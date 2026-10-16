@@ -2,6 +2,10 @@
 
 A command-line tool to search and download books from [Anna's Archive](https://annas-archive.gl) and Libgen.
 
+![bookos demo](assets/demo.gif)
+
+[Watch in full quality (MP4)](assets/demo.mp4)
+
 ```
 $ bookos search dom casmurro -f epub -l pt -n 3
   1  Dom Casmurro (Prazer de Ler) (Portuguese Edition)
