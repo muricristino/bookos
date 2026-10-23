@@ -210,6 +210,18 @@ Runs a small HTTP server so an e-reader on the same network can search and downl
 
 Downloads made through the server are kept in `~/.cache/bookos/downloads`.
 
+### Sync with a folder
+
+`bookos sync` mirrors the books on a jailbroken Kindle (over ssh) with a folder on the computer, both ways. Point it at a folder that Google Drive, Dropbox or iCloud syncs and the books follow you: a book dropped in the folder goes to the Kindle, a book on the Kindle shows up in the folder, and a book deleted on one side is deleted on the other. Folders are kept as they are.
+
+```sh
+bookos config sync_dir "~/Library/CloudStorage/GoogleDrive-you@gmail.com/My Drive/Kindle"
+bookos sync --dry-run
+bookos sync
+```
+
+Deletions only happen for books seen in an earlier sync, so the first run only copies. When more than a quarter of the books would be deleted at once it stops and asks for `--force`. Dictionaries, `.sdr` folders and Amazon's `.kfx` files are left out. To run it every 10 minutes on a Mac, load a launchd agent that runs `bookos sync` with `StartInterval` 600; while the Kindle sleeps, ssh fails and the run is skipped.
+
 ### KOReader plugin
 
 `koreader/bookos.koplugin` searches a bookos server from [KOReader](https://koreader.rocks) and shows the results with their covers. It only looks for epub. The search box has a language filter (Portuguese by default) and can match the author or the title only; both choices are remembered. Turning past the last page loads the next page of results. Tap a book to open its page, with a large cover, the description and a download button. The download goes into `<home folder>/bookos` and the book opens when it arrives. The md5 is checked on the device too.
