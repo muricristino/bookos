@@ -8,7 +8,10 @@ repository = "https://github.com/muricristino/bookos"
 [dependencies]
 anyhow = "1"
 clap = { version = "4.6.7", features = ["derive"] }
+keyring = { version = "3", features = ["apple-native"] }
+lettre = "0.11"
 md-5 = "0.10"
+rpassword = "7"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tungstenite = "0.27"

@@ -1,6 +1,7 @@
 mod aa;
 mod chrome;
 mod download;
+mod kindle;
 mod libgen;
 
 use aa::Book;
@@ -8,6 +9,7 @@ use anyhow::{Context, Result, bail};
 use chrome::Chrome;
 use clap::{Parser, Subcommand};
 use std::env;
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::exit;
 
@@ -21,7 +23,13 @@ use std::process::exit;
   dir=~/Books                                     where to save (default ~/Downloads)
   sources=aa-fast,aa-slow,libgen                  source order
   domain=annas-archive.gl,annas-archive.pk        Anna's Archive domains, in order
-  libgen=libgen.li,libgen.gl                      Libgen mirrors"
+  libgen=libgen.li,libgen.gl                      Libgen mirrors
+  kindle=you@kindle.com                           Send to Kindle address
+  smtp_user=you@gmail.com                         account that emails the Kindle
+  smtp=smtp.gmail.com:587                         SMTP server (guessed for Gmail, Outlook, iCloud, Yahoo)
+
+Set them with `bookos config <key> <value>`. The SMTP password goes to the Keychain:
+`bookos config smtp_pass` (or BOOKOS_SMTP_PASS)."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -57,6 +65,26 @@ enum Cmd {
         /// Only this source: aa-fast, aa-slow or libgen
         #[arg(long)]
         source: Option<String>,
+        /// Send it to the Kindle after downloading
+        #[arg(short, long)]
+        kindle: bool,
+    },
+    /// Send a book to the Kindle by email (Send to Kindle) or over USB
+    Kindle {
+        /// A file, a result number from the last search, or an md5 (downloaded first)
+        target: String,
+        /// email or usb (default: usb when a Kindle is plugged in and reads the format, else email)
+        #[arg(long)]
+        via: Option<String>,
+        /// Destination directory for the download
+        #[arg(short, long)]
+        dir: Option<PathBuf>,
+    },
+    /// Show or change the config: no args lists it, one shows a key, two set it
+    Config {
+        key: Option<String>,
+        /// The value; for smtp_pass, leave it out to type it or use - to read stdin
+        value: Option<String>,
     },
 }
 
@@ -95,8 +123,10 @@ extern "C" fn on_signal(_: i32) {
 fn print_books(books: &[Book]) {
     for (i, b) in books.iter().enumerate() {
         println!("{:>3}  {}", i + 1, b.title);
+        let publisher = b.publisher.split(',').next().unwrap_or("").trim().to_string();
+        let publisher = if publisher == b.year { String::new() } else { publisher };
         let mut info: Vec<&str> = Vec::new();
-        for f in [&b.author, &b.year, &b.lang, &b.ext, &b.size] {
+        for f in [&b.author, &publisher, &b.year, &b.lang, &b.ext, &b.size] {
             if !f.is_empty() {
                 info.push(f);
             }
@@ -158,7 +188,7 @@ fn open_chrome(chrome: &mut Option<Chrome>, show: bool) -> Result<&Chrome> {
     Ok(chrome.as_ref().unwrap())
 }
 
-fn download(target: &str, dir: Option<PathBuf>, source: Option<String>, show: bool) -> Result<()> {
+fn download(target: &str, dir: Option<PathBuf>, source: Option<String>, show: bool) -> Result<PathBuf> {
     let mut chrome: Option<Chrome> = None;
     let book = resolve_target(target, &mut chrome, show)?;
     let dir = dir.or_else(|| config("dir").map(|p| expand(&p))).unwrap_or_else(|| home().join("Downloads"));
@@ -166,7 +196,7 @@ fn download(target: &str, dir: Option<PathBuf>, source: Option<String>, show: bo
     let dest = dir.join(file_name(&book));
     if dest.exists() {
         println!("already downloaded: {}", dest.display());
-        return Ok(());
+        return Ok(dest);
     }
     println!("{}", book.title);
     if !book.author.is_empty() {
@@ -221,7 +251,7 @@ fn download(target: &str, dir: Option<PathBuf>, source: Option<String>, show: bo
             match download::fetch(&url, &dest, &book.md5) {
                 Ok(()) => {
                     println!("saved to {}", dest.display());
-                    return Ok(());
+                    return Ok(dest);
                 }
                 Err(e) => {
                     eprintln!("{source}: {e}");
@@ -258,6 +288,65 @@ fn search(terms: &[String], format: Option<String>, lang: Option<String>, max: u
     Ok(())
 }
 
+fn kindle(target: &str, via: Option<&str>, dir: Option<PathBuf>, show: bool) -> Result<()> {
+    let file = expand(target);
+    let file = if file.is_file() { file } else { download(target, dir, None, show)? };
+    kindle::send(&file, via)
+}
+
+fn config_path() -> PathBuf {
+    home().join(".config/bookos/config")
+}
+
+fn set_config(key: &str, value: &str) -> Result<()> {
+    let text = std::fs::read_to_string(config_path()).unwrap_or_default();
+    let mut lines: Vec<String> = text.lines().filter(|l| l.split_once('=').is_none_or(|(k, _)| k.trim() != key)).map(String::from).collect();
+    if !value.is_empty() {
+        lines.push(format!("{key}={value}"));
+    }
+    std::fs::create_dir_all(home().join(".config/bookos"))?;
+    std::fs::write(config_path(), lines.join("\n") + "\n")?;
+    Ok(())
+}
+
+fn config_cmd(key: Option<String>, value: Option<String>) -> Result<()> {
+    let Some(key) = key else {
+        print!("{}", std::fs::read_to_string(config_path()).unwrap_or_default());
+        if let Some(user) = config("smtp_user")
+            && kindle::password_entry(&user)?.get_password().is_ok()
+        {
+            println!("smtp_pass=(in the Keychain)");
+        }
+        return Ok(());
+    };
+    if key == "smtp_pass" {
+        let user = config("smtp_user").context("set smtp_user first: bookos config smtp_user you@gmail.com")?;
+        let pass = match value.as_deref() {
+            Some("-") => {
+                let mut s = String::new();
+                std::io::stdin().read_to_string(&mut s)?;
+                s.trim().to_string()
+            }
+            Some(v) => v.to_string(),
+            None => rpassword::prompt_password(format!("SMTP password for {user}: "))?,
+        };
+        if pass.is_empty() {
+            bail!("empty password");
+        }
+        kindle::password_entry(&user)?.set_password(&pass)?;
+        println!("saved the SMTP password for {user} in the Keychain");
+        return Ok(());
+    }
+    match value {
+        Some(v) => {
+            set_config(&key, &v)?;
+            println!("{key}={v}");
+        }
+        None => println!("{}", config(&key).unwrap_or_default()),
+    }
+    Ok(())
+}
+
 fn main() {
     unsafe {
         signal(1, on_signal);
@@ -267,7 +356,12 @@ fn main() {
     let cli = Cli::parse();
     let result = match cli.cmd {
         Cmd::Search { terms, format, lang, max, json } => search(&terms, format, lang, max, json, cli.show),
-        Cmd::Download { target, dir, source } => download(&target, dir, source, cli.show),
+        Cmd::Download { target, dir, source, kindle: false } => download(&target, dir, source, cli.show).map(|_| ()),
+        Cmd::Download { target, dir, source, kindle: true } => {
+            download(&target, dir, source, cli.show).and_then(|f| kindle::send(&f, None))
+        }
+        Cmd::Kindle { target, via, dir } => kindle(&target, via.as_deref(), dir, cli.show),
+        Cmd::Config { key, value } => config_cmd(key, value),
     };
     if let Err(e) = result {
         eprintln!("error: {e:#}");
