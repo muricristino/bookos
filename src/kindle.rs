@@ -159,12 +159,59 @@ pub fn verify(link: &str) -> Result<()> {
         .call()
         .context("could not reach Amazon")?;
     let html = resp.body_mut().read_to_string()?;
-    let text = html.split('<').filter_map(|t| t.split_once('>').map(|(_, s)| s.trim())).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ");
-    let lower = text.to_lowercase();
-    if lower.contains("verificad") || lower.contains("verified") {
+    let body = html.find("<h2").map(|i| &html[i..]).unwrap_or("");
+    let body = body.find("</body").map(|i| &body[..i]).unwrap_or(body);
+    let text: String = body.split('<').filter_map(|t| t.split_once('>').map(|(_, s)| s)).collect::<Vec<_>>().join(" ");
+    let message = decode_entities(&text).split_whitespace().collect::<Vec<_>>().join(" ");
+    let lower = message.to_lowercase();
+    if lower.starts_with("verificad") || lower.starts_with("verified") {
         println!("verified: Amazon is delivering the book");
-        Ok(())
-    } else {
-        bail!("Amazon did not confirm the request (HTTP {}); open the link in a browser", resp.status())
+        return Ok(());
     }
+    if message.is_empty() {
+        bail!("Amazon did not confirm the request (HTTP {}); open the link in a browser", resp.status());
+    }
+    bail!("Amazon says: {message}")
+}
+
+fn decode_entities(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        rest = &rest[i..];
+        let Some(end) = rest.find(';').filter(|&e| e < 10) else {
+            out.push('&');
+            rest = &rest[1..];
+            continue;
+        };
+        let name = &rest[1..end];
+        let c = match name {
+            "amp" => Some('&'),
+            "quot" => Some('"'),
+            "apos" => Some('\''),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "nbsp" => Some(' '),
+            _ if name.len() == 6 && name.ends_with("acute") || name.ends_with("tilde") || name.ends_with("cedil") || name.ends_with("circ") || name.ends_with("grave") => {
+                let base = name.chars().next().unwrap_or(' ');
+                let kind = &name[1..];
+                let table: &[(&str, &str, &str)] = &[("acute", "aeiouAEIOU", "áéíóúÁÉÍÓÚ"), ("tilde", "aonAON", "ãõñÃÕÑ"), ("cedil", "cC", "çÇ"), ("circ", "aeoAEO", "âêôÂÊÔ"), ("grave", "aA", "àÀ")];
+                table.iter().find(|(k, _, _)| *k == kind).and_then(|(_, from, to)| from.chars().position(|f| f == base).and_then(|p| to.chars().nth(p)))
+            }
+            _ => None,
+        };
+        match c {
+            Some(c) => {
+                out.push(c);
+                rest = &rest[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
