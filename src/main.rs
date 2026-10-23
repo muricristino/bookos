@@ -6,6 +6,7 @@ mod libgen;
 mod pages;
 mod serve;
 mod store;
+mod sync;
 
 use aa::Book;
 use anyhow::{Context, Result, bail};
@@ -31,6 +32,7 @@ use std::process::exit;
   smtp_user=you@gmail.com                         account that emails the Kindle
   smtp=smtp.gmail.com:587                         SMTP server (guessed for Gmail, Outlook, iCloud, Yahoo)
   ssh=kindle                                      ssh host of a jailbroken Kindle, for --via ssh
+  sync_dir=~/Drive/Kindle                         folder that `bookos sync` mirrors with the Kindle
   mail_command=<shell command>                    send with another tool instead of SMTP;
                                                   {to}, {subject} and {file} are replaced
 
@@ -108,6 +110,15 @@ enum Cmd {
         max: usize,
         #[arg(long)]
         json: bool,
+    },
+    /// Mirror the Kindle's books with a folder (e.g. one synced by Google Drive), both ways, over ssh
+    Sync {
+        /// Show what would change without changing anything
+        #[arg(long)]
+        dry_run: bool,
+        /// Go ahead even when many books would be deleted
+        #[arg(long)]
+        force: bool,
     },
     /// Download by result number from the last search, or by md5
     Download {
@@ -530,6 +541,7 @@ fn main() {
     }
     let cli = Cli::parse();
     let result = match cli.cmd {
+        Cmd::Sync { dry_run, force } => sync::sync(dry_run, force),
         Cmd::Store { shelf, refresh, max, json } => store_cmd(shelf.as_deref(), refresh, max, json, cli.show),
         Cmd::Info { target, json } => info(&target, json, cli.show),
         Cmd::Pages { target, isbn, title, author, lang, publisher, json } => {
