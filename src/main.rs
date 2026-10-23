@@ -3,6 +3,7 @@ mod chrome;
 mod download;
 mod kindle;
 mod libgen;
+mod serve;
 
 use aa::Book;
 use anyhow::{Context, Result, bail};
@@ -85,6 +86,15 @@ enum Cmd {
     },
     /// Confirm a Send to Kindle request from the link in Amazon's "verify your request" email
     Verify { link: String },
+    /// Serve search, covers and downloads over HTTP, for e-readers on the local network
+    Serve {
+        /// Address to listen on
+        #[arg(long, default_value = "0.0.0.0")]
+        bind: String,
+        /// Port to listen on
+        #[arg(short, long, default_value_t = 8337)]
+        port: u16,
+    },
     /// Show or change the config: no args lists it, one shows a key, two set it
     Config {
         key: Option<String>,
@@ -372,6 +382,7 @@ fn main() {
         Cmd::Kindle { target, via, dir } => kindle(&target, via.as_deref(), dir, cli.show),
         Cmd::Config { key, value } => config_cmd(key, value),
         Cmd::Verify { link } => kindle::verify(&link),
+        Cmd::Serve { bind, port } => serve::run(&bind, port, cli.show),
     };
     if let Err(e) = result {
         eprintln!("error: {e:#}");
