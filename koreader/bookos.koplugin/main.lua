@@ -56,8 +56,16 @@ local PT = {
     ["The file arrived damaged (md5 mismatch). Try again."] = "O arquivo chegou corrompido (md5 não bate). Tente de novo.",
     ["Saved to %1"] = "Salvo em %1",
     ["Server address"] = "Endereço do servidor",
-    ["Default format"] = "Formato padrão",
-    ["Any format"] = "Qualquer formato",
+    ["Language: %1"] = "Idioma: %1",
+    ["Search by: %1"] = "Buscar por: %1",
+    ["Portuguese"] = "Português",
+    ["English"] = "Inglês",
+    ["Spanish"] = "Espanhol",
+    ["French"] = "Francês",
+    ["Any"] = "Qualquer",
+    ["Everything"] = "Tudo",
+    ["Author"] = "Autor",
+    ["Title"] = "Título",
     ["Results for “%1”"] = "Resultados para “%1”",
     ["Page %1 of %2"] = "Página %1 de %2",
     ["no cover"] = "sem capa",
@@ -74,8 +82,20 @@ local function server()
     return ((G_reader_settings:readSetting("bookos_server") or ""):gsub("/+$", ""))
 end
 
-local function format()
-    return G_reader_settings:readSetting("bookos_format") or "epub"
+local LANGS = { { "pt", "Portuguese" }, { "en", "English" }, { "es", "Spanish" }, { "fr", "French" }, { "", "Any" } }
+local FIELDS = { { "", "Everything" }, { "author", "Author" }, { "title", "Title" } }
+
+local function choice(list, key, default)
+    local v = G_reader_settings:readSetting(key) or default
+    for i, item in ipairs(list) do
+        if item[1] == v then return i, item end
+    end
+    return 1, list[1]
+end
+
+local function cycle(list, key, default)
+    local i = choice(list, key, default)
+    G_reader_settings:saveSetting(key, list[i % #list + 1][1])
 end
 
 local function cacheDir()
@@ -213,11 +233,15 @@ function Results:init()
     self.footer_h = Screen:scaleBySize(56)
     self.row_h = Screen:scaleBySize(128)
     self.per_page = math.max(1, math.floor((self.height - self.title_bar:getHeight() - self.footer_h) / (self.row_h + Size.line.thin)))
-    self.pages = math.max(1, math.ceil(#self.books / self.per_page))
+    self:countPages()
     if Device:isTouchDevice() then
         self.ges_events.Swipe = { GestureRange:new{ ges = "swipe", range = self.dimen } }
     end
     self:render()
+end
+
+function Results:countPages()
+    self.pages = math.max(1, math.ceil(#self.books / self.per_page))
 end
 
 function Results:render()
@@ -236,8 +260,8 @@ function Results:render()
         list[#list + 1] = LineWidget:new{ dimen = Geom:new{ w = self.width, h = Size.line.thin }, background = Blitbuffer.COLOR_LIGHT_GRAY }
     end
     local prev = Button:new{ text = "◁", bordersize = 0, enabled = self.page > 1, callback = function() self:goTo(self.page - 1) end, show_parent = self }
-    local nxt = Button:new{ text = "▷", bordersize = 0, enabled = self.page < self.pages, callback = function() self:goTo(self.page + 1) end, show_parent = self }
-    local label = TextWidget:new{ text = tr("Page %1 of %2", self.page, self.pages), face = Font:getFace("cfont", 18) }
+    local nxt = Button:new{ text = "▷", bordersize = 0, enabled = self.page < self.pages or self.more, callback = function() self:goTo(self.page + 1) end, show_parent = self }
+    local label = TextWidget:new{ text = tr("Page %1 of %2", self.page, self.pages .. (self.more and "+" or "")), face = Font:getFace("cfont", 18) }
     local footer = CenterContainer:new{
         dimen = Geom:new{ w = self.width, h = self.footer_h },
         HorizontalGroup:new{ align = "center", prev, HorizontalSpan:new{ width = Size.span.horizontal_default * 6 }, label, HorizontalSpan:new{ width = Size.span.horizontal_default * 6 }, nxt },
@@ -255,6 +279,9 @@ function Results:render()
 end
 
 function Results:goTo(page)
+    if page > self.pages and self.more then
+        return self.plugin:loadMore(self, function() self:goTo(page) end)
+    end
     if page < 1 or page > self.pages or page == self.page then return end
     self.page = page
     self.plugin:fetchCovers(self.books, (page - 1) * self.per_page + 1, page * self.per_page, function()
@@ -328,24 +355,8 @@ function Bookos:addToMainMenu(menu_items)
                 keep_menu_open = true,
                 callback = function(menu) self:editServer(menu) end,
             },
-            {
-                text_func = function() return tr("Default format") .. ": " .. (format() == "" and tr("Any format") or format()) end,
-                sub_item_table = self:formatItems(),
-            },
         },
     }
-end
-
-function Bookos:formatItems()
-    local items = {}
-    for _, f in ipairs({ "epub", "pdf", "azw3", "mobi", "" }) do
-        items[#items + 1] = {
-            text = f == "" and tr("Any format") or f,
-            checked_func = function() return format() == f end,
-            callback = function() G_reader_settings:saveSetting("bookos_format", f) end,
-        }
-    end
-    return items
 end
 
 function Bookos:editServer(menu, after)
@@ -373,10 +384,21 @@ function Bookos:search()
         return self:editServer(nil, function() self:search() end)
     end
     local dialog
+    local function langText() return tr("Language: %1", tr(select(2, choice(LANGS, "bookos_lang", "pt"))[2])) end
+    local function fieldText() return tr("Search by: %1", tr(select(2, choice(FIELDS, "bookos_by", ""))[2])) end
+    local function toggle(id, list, key, default, text)
+        cycle(list, key, default)
+        local button = dialog.button_table:getButtonById(id)
+        button:setText(text(), button.width)
+        UIManager:setDirty(dialog, "ui")
+    end
     dialog = InputDialog:new{
         title = tr("Search books"),
         input_hint = tr("Title, author or ISBN"),
         buttons = { {
+            { text = langText(), id = "lang", callback = function() toggle("lang", LANGS, "bookos_lang", "pt", langText) end },
+            { text = fieldText(), id = "by", callback = function() toggle("by", FIELDS, "bookos_by", "", fieldText) end },
+        }, {
             { text = tr("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
             { text = tr("Search"), is_enter_default = true, callback = function()
                 local q = dialog:getInputText()
@@ -400,25 +422,64 @@ function Bookos:runSearch(q)
     local msg = InfoMessage:new{ text = tr("Searching…") }
     UIManager:show(msg)
     UIManager:forceRePaint()
-    local url = server() .. "/search?n=30&q=" .. urlencode(q) .. (format() ~= "" and ("&format=" .. format()) or "")
-    local code, body = request(url, nil, 120, 150)
+    local params = {
+        q = q,
+        lang = select(2, choice(LANGS, "bookos_lang", "pt"))[1],
+        by = select(2, choice(FIELDS, "bookos_by", ""))[1],
+    }
+    local books = self:fetchPage(params, 1)
     UIManager:close(msg)
-    if not code then return self:serverError(body) end
+    if not books then return end
+    if #books == 0 then
+        UIManager:show(InfoMessage:new{ text = tr("Nothing found.") })
+        return
+    end
+    local results = Results:new{ query = q, books = books, plugin = self, params = params, aa_page = 1, more = #books > 0 }
+    self:fetchCovers(books, 1, results.per_page, function()
+        results:render()
+        UIManager:show(results)
+    end)
+end
+
+function Bookos:fetchPage(params, page)
+    local url = server() .. "/search?format=epub&n=100&w=" .. Screen:scaleBySize(110) .. "&page=" .. page .. "&q=" .. urlencode(params.q)
+    if params.lang ~= "" then url = url .. "&lang=" .. params.lang end
+    if params.by ~= "" then url = url .. "&by=" .. params.by end
+    local code, body = request(url, nil, 120, 150)
+    if not code then
+        self:serverError(body)
+        return
+    end
     local ok, data = pcall(JSON.decode, body)
     if code ~= 200 or not ok or type(data) ~= "table" then
         UIManager:show(InfoMessage:new{ text = tr("The server answered: %1", ok and type(data) == "table" and data.error or tostring(code)) })
         return
     end
-    local books = data.results or {}
-    if #books == 0 then
-        UIManager:show(InfoMessage:new{ text = tr("Nothing found.") })
-        return
+    return data.results or {}
+end
+
+function Bookos:loadMore(results, done)
+    local msg = InfoMessage:new{ text = tr("Searching…") }
+    UIManager:show(msg)
+    UIManager:forceRePaint()
+    local books = self:fetchPage(results.params, results.aa_page + 1)
+    UIManager:close(msg)
+    if not books then return end
+    results.aa_page = results.aa_page + 1
+    local seen = {}
+    for _, b in ipairs(results.books) do seen[b.md5] = true end
+    local added = 0
+    for _, b in ipairs(books) do
+        if not seen[b.md5] then
+            results.books[#results.books + 1] = b
+            added = added + 1
+        end
     end
-    local results = Results:new{ query = q, books = books, plugin = self }
-    self:fetchCovers(books, 1, results.per_page, function()
-        results:render()
-        UIManager:show(results)
-    end)
+    results.more = added > 0
+    results:countPages()
+    if added > 0 then return done() end
+    results:render()
+    UIManager:setDirty(results, "ui")
 end
 
 function Bookos:coverPath(book)
