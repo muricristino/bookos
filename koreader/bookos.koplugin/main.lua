@@ -70,10 +70,8 @@ local function tr(s, ...)
     return (out:gsub("%%(%d)", function(i) return tostring(args[tonumber(i)] or "") end))
 end
 
-local DEFAULT_SERVER = "http://192.168.15.8:8337"
-
 local function server()
-    return (G_reader_settings:readSetting("bookos_server") or DEFAULT_SERVER):gsub("/+$", "")
+    return ((G_reader_settings:readSetting("bookos_server") or ""):gsub("/+$", ""))
 end
 
 local function format()
@@ -326,7 +324,7 @@ function Bookos:addToMainMenu(menu_items)
         sub_item_table = {
             { text = tr("Search books"), callback = function() self:search() end },
             {
-                text_func = function() return tr("Server address") .. ": " .. server() end,
+                text_func = function() return tr("Server address") .. ": " .. (server() ~= "" and server() or "—") end,
                 keep_menu_open = true,
                 callback = function(menu) self:editServer(menu) end,
             },
@@ -350,18 +348,19 @@ function Bookos:formatItems()
     return items
 end
 
-function Bookos:editServer(menu)
+function Bookos:editServer(menu, after)
     local dialog
     dialog = InputDialog:new{
         title = tr("Server address"),
-        input = server(),
+        input = server() ~= "" and server() or "http://",
         buttons = { {
             { text = tr("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
             { text = "OK", is_enter_default = true, callback = function()
                 local v = dialog:getInputText():gsub("%s", "")
-                if v ~= "" then G_reader_settings:saveSetting("bookos_server", v) end
+                if v ~= "" and v ~= "http://" then G_reader_settings:saveSetting("bookos_server", v) end
                 UIManager:close(dialog)
                 if menu then menu:updateItems() end
+                if after and server() ~= "" then after() end
             end },
         } },
     }
@@ -370,6 +369,9 @@ function Bookos:editServer(menu)
 end
 
 function Bookos:search()
+    if server() == "" then
+        return self:editServer(nil, function() self:search() end)
+    end
     local dialog
     dialog = InputDialog:new{
         title = tr("Search books"),
