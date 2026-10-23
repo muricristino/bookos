@@ -60,6 +60,12 @@ local PT = {
     ["Already downloading: %1"] = "Já está baixando: %1",
     ["Arrived: %1"] = "Chegou: %1",
     ["Open"] = "Abrir",
+    ["Finished"] = "Lido até o fim",
+    ["Page %1 of %2 · %3% read"] = "Página %1 de %2 · %3% lido",
+    ["Not started · %1 pages"] = "Não começado · %1 páginas",
+    ["Not started"] = "Não começado",
+    ["Continue reading"] = "Continuar leitura",
+    ["Read"] = "Ler",
     ["Later"] = "Depois",
     ["Downloading in the background: %1"] = "Baixando em segundo plano: %1",
     ["Server address"] = "Endereço do servidor",
@@ -199,7 +205,9 @@ function ResultRow:init()
     local cover_h = self.height - 2 * pad
     local cover_w = math.floor(cover_h * 2 / 3)
     local cover
-    if self.cover then
+    if self.cover_bb then
+        cover = FrameContainer:new{ padding = 0, bordersize = Size.border.thin, ImageWidget:new{ image = self.cover_bb, image_disposable = false, width = cover_w, height = cover_h } }
+    elseif self.cover then
         cover = ImageWidget:new{ file = self.cover, width = cover_w, height = cover_h, scale_factor = 0 }
     else
         cover = FrameContainer:new{
@@ -259,7 +267,9 @@ function Details:init()
     local cover_w = math.floor(self.width * 0.36)
     local cover_h = math.floor(cover_w * 3 / 2)
     local cover
-    if self.cover then
+    if self.cover_bb then
+        cover = FrameContainer:new{ padding = 0, bordersize = Size.border.thin, ImageWidget:new{ image = self.cover_bb, image_disposable = false, width = cover_w, height = cover_h } }
+    elseif self.cover then
         cover = ImageWidget:new{ file = self.cover, width = cover_w, height = cover_h, scale_factor = 0 }
     else
         cover = FrameContainer:new{
@@ -279,8 +289,12 @@ function Details:init()
         VerticalSpan:new{ width = Size.span.vertical_default },
         TextWidget:new{ text = info.publisher or book.publisher or "", face = Font:getFace("cfont", 16), fgcolor = Blitbuffer.COLOR_DARK_GRAY, max_width = text_w },
         VerticalSpan:new{ width = Size.span.vertical_default },
-        TextWidget:new{ text = infoLine(book), face = Font:getFace("cfont", 16), fgcolor = Blitbuffer.COLOR_DARK_GRAY, max_width = text_w },
+        TextWidget:new{ text = self.info_line or infoLine(book), face = Font:getFace("cfont", 16), fgcolor = Blitbuffer.COLOR_DARK_GRAY, max_width = text_w },
     }
+    if self.progress then
+        side[#side + 1] = VerticalSpan:new{ width = Size.span.vertical_large * 2 }
+        side[#side + 1] = TextBoxWidget:new{ text = self.progress, face = Font:getFace("cfont", 19), bold = true, width = text_w }
+    end
     local top = HorizontalGroup:new{
         align = "top",
         HorizontalSpan:new{ width = pad },
@@ -289,14 +303,20 @@ function Details:init()
         side,
     }
     local download = Button:new{
-        text = tr("Download"),
+        text = self.action_text or tr("Download"),
         width = self.width - 2 * pad,
         bordersize = Size.border.thick,
         radius = Size.radius.button,
         text_font_size = 22,
         text_font_bold = true,
         padding = Size.padding.large,
-        callback = function() NetworkMgr:runWhenOnline(function() self.plugin:download(book) end) end,
+        callback = function()
+            if self.action then
+                UIManager:close(self)
+                return self.action()
+            end
+            NetworkMgr:runWhenOnline(function() self.plugin:download(book) end)
+        end,
         show_parent = self,
     }
     local lines = {}
@@ -459,6 +479,74 @@ local Bookos = WidgetContainer:extend{
     is_doc_only = false,
 }
 
+function Bookos:showLocal(book)
+    local DocSettings = require("docsettings")
+    local info, bb
+    local ok_cfg, Config = pcall(require, "infra/sui_config")
+    local manager = ok_cfg and Config and Config.getBookInfoManager and Config.getBookInfoManager()
+    if manager then
+        local ok, i = pcall(manager.getBookInfo, manager, book.file, true)
+        if ok and i then info = i end
+    end
+    local cover_w = math.floor(Screen:getWidth() * 0.36)
+    if info and info.has_cover and Config.getStretchedCoverBB then
+        bb = Config.getStretchedCoverBB(book.file, cover_w, math.floor(cover_w * 3 / 2))
+    end
+    local percent, printed, pages, status = 0, nil, nil, nil
+    local ok_ds, ds = pcall(DocSettings.open, DocSettings, book.file)
+    if ok_ds and ds then
+        percent = tonumber(ds:readSetting("percent_finished")) or 0
+        printed = tonumber(ds:readSetting("bookos_physical_pages"))
+        pages = tonumber(ds:readSetting("doc_pages"))
+        local summary = ds:readSetting("summary")
+        status = summary and summary.status
+    end
+    local total = printed or (info and tonumber(info.pages)) or pages
+    local progress
+    if status == "complete" then
+        progress = tr("Finished")
+    elseif percent > 0 and total then
+        progress = tr("Page %1 of %2 · %3% read", math.max(1, math.floor(percent * total + 0.5)), total, math.floor(percent * 100 + 0.5))
+    elseif total then
+        progress = tr("Not started · %1 pages", total)
+    else
+        progress = tr("Not started")
+    end
+    local ext = (book.file:match("%.([^.]+)$") or ""):lower()
+    local size = lfs.attributes(book.file, "size") or 0
+    local description = info and info.description
+    if (not description or description == "") and ds then description = ds:readSetting("bookos_description") end
+    if (not description or description == "") and server() ~= "" and size < 200 * 1048576 then
+        local msg = InfoMessage:new{ text = tr("Loading…") }
+        UIManager:show(msg)
+        UIManager:forceRePaint()
+        local code, body = request(server() .. "/book/" .. fileMD5(book.file), nil, 8, 20)
+        UIManager:close(msg)
+        local ok, data = pcall(JSON.decode, body or "")
+        if code == 200 and ok and type(data) == "table" then
+            description = data.description
+            for _, f in ipairs(data.fields or {}) do
+                if (not description or description == "") and f[1] == "alternative description" then description = f[2] end
+            end
+            if description and description ~= "" and ds then
+                ds:saveSetting("bookos_description", description)
+                ds:flush()
+            end
+        end
+    end
+    if description then description = util.htmlToPlainTextIfHtml(description) end
+    UIManager:show(Details:new{
+        book = { title = book.title, author = book.author },
+        info = { title = book.title, author = book.author, publisher = info and info.series or "", description = description },
+        cover_bb = bb,
+        info_line = string.format("%s · %.1f MB", ext, size / 1048576),
+        progress = progress,
+        action_text = percent > 0 and tr("Continue reading") or tr("Read"),
+        action = function() book.open(book.file) end,
+        plugin = self,
+    })
+end
+
 local current
 
 local Library = require("bookos_library")
@@ -468,6 +556,7 @@ Library.setup{
     cacheDir = cacheDir,
     search = function() if current then current:search() end end,
     details = function(book) if current then current:showDetails(book) end end,
+    localDetails = function(book) if current then current:showLocal(book) end end,
     editServer = function() if current then current:editServer() end end,
     showList = function(title, books)
         if not current then return end

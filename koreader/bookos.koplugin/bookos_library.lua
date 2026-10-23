@@ -336,11 +336,13 @@ local function recentBooks(limit)
     local ok, ReadHistory = pcall(require, "readhistory")
     if not ok then return {} end
     local home = homeDir()
-    local list = {}
+    local list, seen = {}, {}
     for _, item in ipairs(ReadHistory.hist or {}) do
         if #list >= limit then break end
-        if item.file and lfs.attributes(item.file, "mode") == "file" then
-            local m = bookMeta(item.file, home)
+        local m = item.file and lfs.attributes(item.file, "mode") == "file" and bookMeta(item.file, home)
+        local key = m and fold(m.title):gsub("%b()", ""):gsub("%b[]", ""):gsub("[^%w]", "")
+        if m and not seen[key] then
+            seen[key] = true
             local percent, printed = 0, nil
             local ok_ds, ds = pcall(DocSettings.open, DocSettings, item.file)
             if ok_ds and ds then
@@ -509,9 +511,13 @@ local function openBook(fp)
     ReaderUI:showReader(fp)
 end
 
+local function showBook(book)
+    deps.localDetails({ file = book.file, title = book.title, author = book.author, open = openBook })
+end
+
 local function recentBlocks(w, avail)
     local cols = 4
-    local caption_h = S(30)
+    local caption_h = 0
     local overhead = S(8) + S(5) + S(2) + S(18)
     local cover_w = math.floor((w - (cols - 1) * S(16)) / cols)
     local cover_h = math.min(math.floor(cover_w * 1.5), math.floor((avail - caption_h - 2 * overhead) / 2))
@@ -527,19 +533,8 @@ local function recentBlocks(w, avail)
         block[1] = coverRow(row, cols, w, cover_w, cover_h, function(book, cw, ch)
             local cover = localCover(book, cw, ch)
             local item = VerticalGroup:new{ align = "left", progressBar(cw, book.percent), VerticalSpan:new{ width = S(5) }, cover }
-            return tappable(item, function() openBook(book.file) end)
+            return tappable(item, function() openBook(book.file) end, function() showBook(book) end)
         end)
-        if i == 1 then
-            local b = books[1]
-            local where
-            if b.printed and b.printed > 0 then
-                where = string.format("pág. %d de %d", math.max(1, math.floor(b.percent * b.printed + 0.5)), b.printed)
-            else
-                where = string.format("%d%%", math.floor((b.percent or 0) * 100 + 0.5))
-            end
-            block[#block + 1] = VerticalSpan:new{ width = S(6) }
-            block[#block + 1] = TextWidget:new{ text = b.title .. " · " .. where, face = sans(14), fgcolor = GRAY, max_width = w }
-        end
         block[#block + 1] = VerticalSpan:new{ width = S(18) }
         blocks[#blocks + 1] = block
     end
@@ -573,9 +568,10 @@ end
 local function libraryBlocks(w, avail)
     local head_h = S(30)
     local overhead = head_h + S(6) + S(2) + S(8) + S(10)
-    local cover_h = math.min(S(170), math.floor((avail - S(52)) / 3) - overhead - S(2))
-    local cover_w = math.floor(cover_h / 1.5)
-    local cols = math.max(4, math.floor((w + S(10)) / (cover_w + S(10))))
+    local cols = 4
+    local cover_w = math.floor((w - (cols - 1) * S(16)) / cols)
+    local cover_h = math.min(math.floor(cover_w * 1.5), math.floor((avail - S(52)) / 2) - overhead - S(2))
+    cover_w = math.min(cover_w, math.floor(cover_h / 1.5))
     local groups = authorsShelves()
     local total = 0
     for _, g in ipairs(groups) do total = total + #g.books end
@@ -589,19 +585,21 @@ local function libraryBlocks(w, avail)
     if sortMode() == "title" then groups = titleShelves(groups) end
     for _, group in ipairs(groups) do
         local n = #group.books
-        local block = VerticalGroup:new{ align = "left" }
-        block[1] = shelfHeader(group.author, n == 1 and "1 livro" or (n .. " livros"), w)
-        block[2] = VerticalSpan:new{ width = S(6) }
-        for _, row in ipairs(chunk(group.books, cols)) do
+        local rows = chunk(group.books, cols)
+        for r, row in ipairs(rows) do
+            local block = VerticalGroup:new{ align = "left" }
+            if r == 1 then
+                block[1] = shelfHeader(group.author, n == 1 and "1 livro" or (n .. " livros"), w)
+                block[2] = VerticalSpan:new{ width = S(6) }
+                block.bookos_index = group.author
+                block.bookos_count = n
+            end
             block[#block + 1] = coverRow(row, cols, w, cover_w, cover_h, function(book, cw, ch)
-                return tappable(localCover(book, cw, ch), function() openBook(book.file) end)
+                return tappable(localCover(book, cw, ch), function() openBook(book.file) end, function() showBook(book) end)
             end)
-            block[#block + 1] = VerticalSpan:new{ width = S(8) }
+            block[#block + 1] = VerticalSpan:new{ width = r == #rows and S(18) or S(8) }
+            blocks[#blocks + 1] = block
         end
-        block[#block + 1] = VerticalSpan:new{ width = S(10) }
-        block.bookos_index = group.author
-        block.bookos_count = n
-        blocks[#blocks + 1] = block
     end
     return blocks
 end
