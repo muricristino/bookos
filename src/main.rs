@@ -61,6 +61,9 @@ enum Cmd {
         /// Results page
         #[arg(short, long, default_value_t = 1)]
         page: u32,
+        /// Order: newest, oldest, largest, smallest, newest_added, oldest_added
+        #[arg(long)]
+        sort: Option<String>,
         /// How many results to show
         #[arg(short = 'n', long, default_value_t = 10)]
         max: usize,
@@ -376,7 +379,7 @@ fn pages_cmd(target: Option<&str>, flags: pages::Query, json: bool, show: bool) 
 
 fn search(terms: &[String], filters: aa::Filters, max: usize, json: bool, show: bool) -> Result<()> {
     let query = terms.join(" ");
-    if query.trim().is_empty() {
+    if query.trim().is_empty() && filters.sort.is_none() {
         bail!("say what to search for: bookos search <title, author, isbn…>");
     }
     let chrome = Chrome::open(show)?;
@@ -468,8 +471,8 @@ fn main() {
             let flags = pages::Query { isbn: isbn.as_deref(), title: title.as_deref(), author: author.as_deref(), lang: lang.as_deref(), publisher: publisher.as_deref() };
             pages_cmd(target.as_deref(), flags, json, cli.show)
         }
-        Cmd::Search { terms, format, lang, by, page, max, json } => {
-            let filters = aa::Filters { ext: format.as_deref(), lang: lang.as_deref(), field: by.as_deref(), page };
+        Cmd::Search { terms, format, lang, by, page, sort, max, json } => {
+            let filters = aa::Filters { ext: format.as_deref(), lang: lang.as_deref(), field: by.as_deref(), page, sort: sort.as_deref() };
             search(&terms, filters, max, json, cli.show)
         }
         Cmd::Download { target, dir, source, kindle: false } => download(&target, dir, source, cli.show).map(|_| ()),

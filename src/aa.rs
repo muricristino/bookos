@@ -104,16 +104,20 @@ pub struct Filters<'a> {
     pub lang: Option<&'a str>,
     pub field: Option<&'a str>,
     pub page: u32,
+    pub sort: Option<&'a str>,
 }
 
 pub fn search(chrome: &Chrome, query: &str, filters: Filters) -> Result<Vec<Book>> {
-    let Filters { ext, lang, field, page } = filters;
+    let Filters { ext, lang, field, page, sort } = filters;
     let mut url = match field {
         Some(f) => format!("/search?q=&termtype_1={}&termval_1={}", encode(f), encode(query)),
         None => format!("/search?q={}", encode(query)),
     };
     if page > 1 {
         url.push_str(&format!("&page={page}"));
+    }
+    if let Some(s) = sort {
+        url.push_str(&format!("&sort={}", encode(s)));
     }
     if let Some(e) = ext {
         url.push_str(&format!("&ext={}", encode(&e.to_lowercase())));

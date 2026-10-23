@@ -143,6 +143,7 @@ fn search(state: &State, params: &HashMap<String, String>) -> Result<Reply> {
         lang: param("lang"),
         field: param("by").filter(|f| ["author", "title"].contains(f)),
         page: param("page").and_then(|p| p.parse().ok()).unwrap_or(1),
+        sort: param("sort"),
     };
     let max = param("n").and_then(|n| n.parse().ok()).unwrap_or(20usize);
     let mut books = with_chrome(state, |c| aa::search(c, query, filters))?;
