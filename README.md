@@ -1,6 +1,6 @@
 # bookos
 
-A command-line tool to search and download books from [Anna's Archive](https://annas-archive.gl) and Libgen, and send them to your Kindle.
+A command-line tool to search and download books from [Anna's Archive](https://annas-archive.gl) and Libgen, send them to your Kindle, and search from KOReader.
 
 ![bookos demo](assets/demo.gif)
 
@@ -145,6 +145,33 @@ bookos config                  # print the config
 bookos config dir              # print one key
 bookos config dir ~/Books      # set a key
 ```
+
+### Serve (for e-readers)
+
+```
+bookos serve [--bind 0.0.0.0] [-p 8337]
+```
+
+Runs a small HTTP server so an e-reader on the same network can search and download through this computer. The e-reader can't pass Anna's Archive's browser check by itself, so the searches run in the same Chrome as the CLI; one Chrome stays open and requests take turns using it.
+
+| Endpoint | Answer |
+|---|---|
+| `GET /search?q=&format=&lang=&n=` | JSON with `results`: md5, title, author, publisher, year, lang, ext, size, `cover_url` and `download_url` |
+| `GET /cover/<md5>.jpg?w=300` | The cover as a grayscale JPEG, `w` pixels wide (60 to 1236), cached in `~/.cache/bookos/covers` |
+| `GET /download/<md5>` | `202` with JSON progress (`state`, `bytes`, `size`) while the server downloads; ask again until it answers `200` with the md5-checked file |
+
+Downloads made through the server are kept in `~/.cache/bookos/downloads`.
+
+### KOReader plugin
+
+`koreader/bookos.koplugin` searches a bookos server from [KOReader](https://koreader.rocks) and shows the results with their covers. Tap a book to download it into `<home folder>/bookos` and open it. The md5 is checked on the device too.
+
+1. Copy `koreader/bookos.koplugin` into KOReader's `plugins` folder (on a Kindle, `/mnt/us/koreader/plugins/`) and restart KOReader.
+2. Run `bookos serve` on a computer on the same network.
+3. In KOReader, open the search menu › bookos › Server address, and enter `http://<computer ip>:8337`.
+4. Search from the same menu. The search is also a Dispatcher action, so it can be bound to a gesture. With [SimpleUI](https://github.com/doctorhetfield-cmd/simpleui.koplugin), it registers a `bookos_search` quick action that can go in the bottom bar.
+
+The plugin speaks Portuguese when KOReader is set to Portuguese, and English otherwise.
 
 ### Global flag
 
