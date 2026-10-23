@@ -17,13 +17,22 @@ pub struct Book {
     pub size: String,
     pub kind: String,
     pub sources: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub cover: String,
 }
 
 const SEARCH_JS: &str = r#"JSON.stringify([...document.querySelectorAll('a.js-vim-focus[href^="/md5/"]')].map(a => {
   const info = a.parentElement.parentElement;
   const icon = n => { const s = info.querySelector('[class*="mdi--' + n + '"]'); return s ? s.parentElement.textContent.trim() : '' };
   const meta = info.querySelector('div.text-gray-800') || [...info.querySelectorAll('div')].find(d => / · /.test(d.textContent) && /\d(KB|MB|GB)/.test(d.textContent));
-  return { md5: a.getAttribute('href').slice(5), title: a.textContent.trim(), author: icon('user-edit'), publisher: icon('company'), meta: meta ? meta.textContent.trim() : '' };
+  let row = a, img = null;
+  for (let i = 0; i < 6 && !img && row.parentElement; i++) {
+    row = row.parentElement;
+    if (row.querySelectorAll('a.js-vim-focus[href^="/md5/"]').length > 1) break;
+    img = row.querySelector('img');
+  }
+  const cover = img ? (img.getAttribute('src') || img.getAttribute('data-src') || '') : '';
+  return { md5: a.getAttribute('href').slice(5), title: a.textContent.trim(), author: icon('user-edit'), publisher: icon('company'), meta: meta ? meta.textContent.trim() : '', cover: cover.startsWith('http') ? cover : '' };
 }))"#;
 
 const SLOW_JS: &str = r#"JSON.stringify((() => {
@@ -113,7 +122,7 @@ pub fn search(chrome: &Chrome, query: &str, ext: Option<&str>, lang: Option<&str
     let mut books = Vec::new();
     for item in raw.as_array().cloned().unwrap_or_default() {
         let s = |k: &str| item[k].as_str().unwrap_or("").trim().to_string();
-        let mut book = Book { md5: s("md5"), title: s("title"), author: s("author"), publisher: s("publisher"), ..Default::default() };
+        let mut book = Book { md5: s("md5"), title: s("title"), author: s("author"), publisher: s("publisher"), cover: s("cover"), ..Default::default() };
         if book.md5.len() != 32 || books.iter().any(|b: &Book| b.md5 == book.md5) {
             continue;
         }
