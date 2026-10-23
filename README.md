@@ -1,6 +1,6 @@
 # bookos
 
-A command-line tool to search and download books from [Anna's Archive](https://annas-archive.gl) and Libgen.
+A command-line tool to search and download books from [Anna's Archive](https://annas-archive.gl) and Libgen, and send them to your Kindle.
 
 ![bookos demo](assets/demo.gif)
 

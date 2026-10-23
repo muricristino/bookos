@@ -17,7 +17,7 @@ use std::process::exit;
 #[command(
     name = "bookos",
     version,
-    about = "Search and download books from Anna's Archive and Libgen",
+    about = "Search and download books from Anna's Archive and Libgen, and send them to a Kindle",
     after_help = "Config in ~/.config/bookos/config (key=value):
   key=<Anna's Archive member secret key>          enables fast downloads
   dir=~/Books                                     where to save (default ~/Downloads)

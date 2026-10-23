@@ -1,8 +1,8 @@
 [package]
 name = "bookos"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description = "Search and download books from Anna's Archive and Libgen"
+description = "Search and download books from Anna's Archive and Libgen, and send them to a Kindle"
 repository = "https://github.com/muricristino/bookos"
 
 [dependencies]
