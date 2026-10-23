@@ -1,10 +1,12 @@
 local Blitbuffer = require("ffi/blitbuffer")
 local Button = require("ui/widget/button")
+local ButtonDialog = require("ui/widget/buttondialog")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
 local Device = require("device")
 local Dispatcher = require("dispatcher")
+local Event = require("ui/event")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
@@ -70,6 +72,15 @@ local PT = {
     ["Page %1 of %2"] = "Página %1 de %2",
     ["no cover"] = "sem capa",
     ["Loading…"] = "Carregando…",
+    ["Physical book pages"] = "Páginas do livro físico",
+    ["Physical book pages: %1"] = "Páginas do livro físico: %1",
+    ["off"] = "desligado",
+    ["Looking for the printed edition…"] = "Procurando a edição impressa…",
+    ["No printed edition found for this book."] = "Não achei edição impressa deste livro.",
+    ["Choose the printed edition"] = "Escolha a edição impressa",
+    ["%1 pages"] = "%1 páginas",
+    ["Turn off"] = "Desligar",
+    ["Pages now follow the printed book: %1 pages."] = "As páginas agora seguem o livro impresso: %1 páginas.",
     ["Description"] = "Sinopse",
     ["No description."] = "Sem sinopse.",
     ["alternative publisher"] = "Outra editora",
@@ -465,12 +476,165 @@ function Bookos:registerQuickAction()
     }
 end
 
+local function docQuery(ui)
+    local props = ui.doc_props or {}
+    local q = { title = props.title or "", author = (props.authors or ""):gsub("\n.*", ""), lang = props.language or "" }
+    local raw = ui.doc_settings:readSetting("doc_props") or {}
+    local ids = (props.identifiers or raw.identifiers or ""):gsub("[%-%s]", "")
+    q.isbn = ids:match("97[89]%d%d%d%d%d%d%d%d%d%d") or ids:lower():match("isbn:?(%d%d%d%d%d%d%d%d%d[%dx])") or ""
+    if q.title == "" then q.title = (ui.document.file or ""):match("([^/]+)%.%w+$") or "" end
+    return q
+end
+
+function Bookos:fetchPhysicalPages(timeout)
+    if server() == "" or not self.ui.document then return end
+    local q = docQuery(self.ui)
+    local url = server() .. "/pages?title=" .. urlencode(q.title) .. "&author=" .. urlencode(q.author) .. "&lang=" .. urlencode(q.lang) .. "&isbn=" .. urlencode(q.isbn)
+    local code, body = request(url, nil, timeout or 30, timeout or 30)
+    if code ~= 200 then return nil, code end
+    local ok, data = pcall(JSON.decode, body)
+    if ok and type(data) == "table" and tonumber(data.pages) then return data end
+end
+
+function Bookos:applyPhysicalPages(pages)
+    local pm, doc = self.ui.pagemap, self.ui.document
+    if not pm or not doc.buildSyntheticPageMap then return end
+    local function count(cpp)
+        doc:buildSyntheticPageMap(cpp)
+        return tonumber(pm:getLastPageLabel(true))
+    end
+    local cpp = pm.chars_per_synthetic_page or pm.chars_per_synthetic_page_default
+    local n = count(cpp)
+    if not n or n < 1 then return end
+    for _ = 1, 4 do
+        if n == pages then break end
+        cpp = math.max(50, math.floor(cpp * n / pages + 0.5))
+        n = count(cpp)
+    end
+    local step = n < pages and -1 or 1
+    for _ = 1, 30 do
+        if n == pages then break end
+        local next_n = count(cpp + step)
+        if (step < 0 and next_n > pages) or (step > 0 and next_n < pages) then
+            n = count(cpp)
+            break
+        end
+        cpp = cpp + step
+        n = next_n
+    end
+    if not pm.has_pagemap then
+        pm.has_pagemap = true
+        pm:resetLayout()
+        pm.view:registerViewModule("pagemap", pm)
+    end
+    pm.chars_per_synthetic_page = cpp
+    pm.page_labels_cache = nil
+    pm.use_page_labels = true
+    local ds = self.ui.doc_settings
+    ds:saveSetting("pagemap_chars_per_synthetic_page", cpp)
+    ds:saveSetting("pagemap_use_page_labels", true)
+    ds:saveSetting("pagemap_doc_pages", select(3, pm:getCurrentPageLabel()))
+    ds:saveSetting("bookos_physical_pages", pages)
+    pm:updateVisibleLabels()
+    UIManager:broadcastEvent(Event:new("UsePageLabelsUpdated"))
+    UIManager:setDirty(self.ui.dialog, "partial")
+    return n
+end
+
+function Bookos:turnOffPhysicalPages()
+    local pm, ds = self.ui.pagemap, self.ui.doc_settings
+    ds:delSetting("bookos_physical_pages")
+    if pm.has_pagemap_document_provided then return end
+    pm.use_page_labels = false
+    ds:saveSetting("pagemap_use_page_labels", false)
+    UIManager:broadcastEvent(Event:new("UsePageLabelsUpdated"))
+    UIManager:setDirty(self.ui.dialog, "partial")
+end
+
+function Bookos:choosePhysicalEdition(menu)
+    local msg = InfoMessage:new{ text = tr("Looking for the printed edition…") }
+    UIManager:show(msg)
+    UIManager:forceRePaint()
+    local data, err = self:fetchPhysicalPages(60)
+    UIManager:close(msg)
+    if not data then
+        if err == nil or type(err) == "string" then return self:serverError(err) end
+        UIManager:show(InfoMessage:new{ text = tr("No printed edition found for this book.") })
+        return
+    end
+    local dialog
+    local current = self.ui.doc_settings:readSetting("bookos_physical_pages")
+    local marked = false
+    local buttons = {}
+    for i, e in ipairs(data.editions or {}) do
+        if i > 8 then break end
+        local parts = { tr("%1 pages", e.pages) }
+        for _, v in ipairs({ e.publisher, e.year }) do
+            if v and v ~= "" then parts[#parts + 1] = v end
+        end
+        local label = table.concat(parts, " · ")
+        if current == e.pages and not marked then
+            label = "✓ " .. label
+            marked = true
+        end
+        buttons[#buttons + 1] = { {
+            text = label,
+            callback = function()
+                UIManager:close(dialog)
+                self:applyPhysicalPages(e.pages)
+                if menu then menu:updateItems() end
+                UIManager:show(InfoMessage:new{ text = tr("Pages now follow the printed book: %1 pages.", e.pages), timeout = 3 })
+            end,
+        } }
+    end
+    buttons[#buttons + 1] = { {
+        text = tr("Turn off"),
+        callback = function()
+            UIManager:close(dialog)
+            self:turnOffPhysicalPages()
+            if menu then menu:updateItems() end
+        end,
+    } }
+    dialog = ButtonDialog:new{ title = tr("Choose the printed edition"), buttons = buttons }
+    UIManager:show(dialog)
+end
+
+function Bookos:onReaderReady()
+    local ds = self.ui.doc_settings
+    if not self.ui.pagemap or not self.ui.document.buildSyntheticPageMap then return end
+    if ds:readSetting("bookos_physical_pages") or ds:isTrue("bookos_physical_checked") then return end
+    if self.ui.pagemap.has_pagemap_document_provided then
+        ds:saveSetting("bookos_physical_checked", true)
+        return
+    end
+    if server() == "" then return end
+    UIManager:scheduleIn(1, function()
+        if not self.ui.document then return end
+        local data, err = self:fetchPhysicalPages(20)
+        logger.dbg("bookos: physical pages", data and data.pages, err)
+        if data then
+            self:applyPhysicalPages(tonumber(data.pages))
+            ds:saveSetting("bookos_physical_checked", true)
+        elseif err == 404 then
+            ds:saveSetting("bookos_physical_checked", true)
+        end
+    end)
+end
+
 function Bookos:onBookosSearch()
     self:search()
     return true
 end
 
 function Bookos:addToMainMenu(menu_items)
+    local physical = self.ui.document and self.ui.pagemap and {
+        text_func = function()
+            local n = self.ui.doc_settings:readSetting("bookos_physical_pages")
+            return tr("Physical book pages: %1", n or tr("off"))
+        end,
+        keep_menu_open = true,
+        callback = function(menu) self:choosePhysicalEdition(menu) end,
+    }
     menu_items.bookos = {
         text = "bookos",
         sorting_hint = "search",
@@ -483,6 +647,7 @@ function Bookos:addToMainMenu(menu_items)
             },
         },
     }
+    if physical then table.insert(menu_items.bookos.sub_item_table, 1, physical) end
 end
 
 function Bookos:editServer(menu, after)
