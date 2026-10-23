@@ -57,6 +57,11 @@ local PT = {
     ["The download failed: %1"] = "O download falhou: %1",
     ["The file arrived damaged (md5 mismatch). Try again."] = "O arquivo chegou corrompido (md5 não bate). Tente de novo.",
     ["Saved to %1"] = "Salvo em %1",
+    ["Already downloading: %1"] = "Já está baixando: %1",
+    ["Arrived: %1"] = "Chegou: %1",
+    ["Open"] = "Abrir",
+    ["Later"] = "Depois",
+    ["Downloading in the background: %1"] = "Baixando em segundo plano: %1",
     ["Server address"] = "Endereço do servidor",
     ["Language: %1"] = "Idioma: %1",
     ["Search by: %1"] = "Buscar por: %1",
@@ -853,37 +858,28 @@ function Bookos:showDetails(book)
     UIManager:show(Details:new{ book = book, info = info, cover = cover, plugin = self })
 end
 
+local downloading = {}
+
 function Bookos:download(book)
-    local tmp = cacheDir() .. "/" .. book.md5 .. ".download"
-    local msg
-    local function show(text)
-        if msg then UIManager:close(msg) end
-        msg = InfoMessage:new{ text = text, dismissable = false }
-        UIManager:show(msg)
-        UIManager:forceRePaint()
+    if downloading[book.md5] then
+        return UIManager:show(InfoMessage:new{ text = tr("Already downloading: %1", book.title or ""), timeout = 2 })
     end
-    local function finish(text)
-        if msg then UIManager:close(msg) end
-        if text then UIManager:show(InfoMessage:new{ text = text }) end
+    downloading[book.md5] = true
+    local tmp = cacheDir() .. "/" .. book.md5 .. ".download"
+    local function fail(text)
+        downloading[book.md5] = nil
+        UIManager:show(InfoMessage:new{ text = (book.title or "") .. "\n\n" .. text })
     end
     local poll
     poll = function()
         local code, err, headers = request(server() .. "/download/" .. book.md5, tmp, 30, 900)
         if not code then
-            finish()
+            downloading[book.md5] = nil
             return self:serverError(err)
         end
         if code == 202 then
-            local f = io.open(tmp, "rb")
-            local body = f and f:read("*a") or ""
-            if f then f:close() end
             os.remove(tmp)
-            local ok, data = pcall(JSON.decode, body)
-            local bytes = ok and type(data) == "table" and tonumber(data.bytes) or 0
-            local size = ok and type(data) == "table" and data.size or ""
-            local progress = bytes > 0 and string.format("%.1f MB / %s", bytes / 1048576, size ~= "" and size or "?") or tr("Waiting for the server…")
-            show(tr("Downloading…") .. "\n\n" .. (book.title or "") .. "\n" .. progress)
-            UIManager:scheduleIn(3, poll)
+            UIManager:scheduleIn(5, poll)
             return
         end
         if code ~= 200 then
@@ -892,11 +888,11 @@ function Bookos:download(book)
             if f then f:close() end
             os.remove(tmp)
             local ok, data = pcall(JSON.decode, body)
-            return finish(tr("The download failed: %1", ok and type(data) == "table" and data.error or tostring(code)))
+            return fail(tr("The download failed: %1", ok and type(data) == "table" and data.error or tostring(code)))
         end
         if fileMD5(tmp) ~= book.md5 then
             os.remove(tmp)
-            return finish(tr("The file arrived damaged (md5 mismatch). Try again."))
+            return fail(tr("The file arrived damaged (md5 mismatch). Try again."))
         end
         local disposition = headers and headers["content-disposition"] or ""
         local name = disposition:match("filename%*=UTF%-8''([^;]+)")
@@ -905,16 +901,20 @@ function Bookos:download(book)
         local dest = downloadDir() .. "/" .. name
         os.remove(dest)
         os.rename(tmp, dest)
+        downloading[book.md5] = nil
         Library.invalidate()
-        finish()
-        UIManager:show(InfoMessage:new{ text = tr("Saved to %1", dest), timeout = 2 })
-        UIManager:scheduleIn(1, function()
-            local ReaderUI = require("apps/reader/readerui")
-            ReaderUI:showReader(dest)
-        end)
+        UIManager:show(ConfirmBox:new{
+            text = tr("Arrived: %1", book.title or name),
+            ok_text = tr("Open"),
+            cancel_text = tr("Later"),
+            ok_callback = function()
+                local ReaderUI = require("apps/reader/readerui")
+                ReaderUI:showReader(dest)
+            end,
+        })
     end
-    show(tr("Downloading…") .. "\n\n" .. (book.title or ""))
-    UIManager:nextTick(poll)
+    UIManager:show(InfoMessage:new{ text = tr("Downloading in the background: %1", book.title or ""), timeout = 2 })
+    UIManager:scheduleIn(2.5, poll)
 end
 
 return Bookos
