@@ -103,7 +103,7 @@ bookos download 1 -d ~/Books --source libgen
 ### Send to Kindle
 
 ```
-bookos kindle <file|number|md5> [--via email|usb] [-d DIR]
+bookos kindle <file|number|md5> [--via email|usb|ssh] [-d DIR]
 bookos download <number|md5> --kindle
 ```
 
@@ -123,6 +123,13 @@ To send with another mail tool instead of SMTP (for example an Outlook account t
 
 ```
 bookos config mail_command "mymailer --to {to} --subject {subject} --attach {file}"
+```
+
+On a jailbroken Kindle with an ssh server (for example the dropbear that ships with KOReader), `--via ssh` copies any format straight into `/mnt/us/documents` over Wi-Fi:
+
+```
+bookos config ssh kindle                  # a Host in ~/.ssh/config, or root@192.168.0.20
+bookos kindle book.epub --via ssh
 ```
 
 Amazon sometimes answers with a "verify your request" email. Confirm it from the terminal with the link in it:
@@ -169,6 +176,7 @@ smtp=smtp.gmail.com:587
 | `libgen` | `libgen.li,libgen.gl,libgen.la,libgen.bz,libgen.vg` | Libgen mirrors, tried in order |
 | `kindle` | none | Your Send to Kindle email address |
 | `smtp_user` | none | Email account that sends to the Kindle |
+| `ssh` | none | ssh host of a jailbroken Kindle, used by `--via ssh` |
 | `mail_command` | none | Shell command that sends the email instead of SMTP |
 | `smtp` | guessed from `smtp_user` | SMTP server as `host:port` (465 uses TLS, anything else STARTTLS) |
 
