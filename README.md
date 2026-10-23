@@ -125,6 +125,12 @@ To send with another mail tool instead of SMTP (for example an Outlook account t
 bookos config mail_command "mymailer --to {to} --subject {subject} --attach {file}"
 ```
 
+Amazon sometimes answers with a "verify your request" email. Confirm it from the terminal with the link in it:
+
+```
+bookos verify https://www.amazon.com/sendtokindle/verification/confirm/…
+```
+
 ### Config
 
 ```
