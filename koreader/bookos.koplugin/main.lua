@@ -20,6 +20,7 @@ local LeftContainer = require("ui/widget/container/leftcontainer")
 local LineWidget = require("ui/widget/linewidget")
 local NetworkMgr = require("ui/network/manager")
 local Size = require("ui/size")
+local ScrollTextWidget = require("ui/widget/scrolltextwidget")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local TextWidget = require("ui/widget/textwidget")
 local TitleBar = require("ui/widget/titlebar")
@@ -49,7 +50,6 @@ local PT = {
     ["Could not reach the bookos server at %1. Is the computer on and on the same network?"] = "Não consegui falar com o servidor bookos em %1. O computador está ligado e na mesma rede?",
     ["The server answered: %1"] = "O servidor respondeu: %1",
     ["Download"] = "Baixar",
-    ["Download this book?"] = "Baixar este livro?",
     ["Downloading…"] = "Baixando…",
     ["Waiting for the server…"] = "Esperando o servidor…",
     ["The download failed: %1"] = "O download falhou: %1",
@@ -69,6 +69,14 @@ local PT = {
     ["Results for “%1”"] = "Resultados para “%1”",
     ["Page %1 of %2"] = "Página %1 de %2",
     ["no cover"] = "sem capa",
+    ["Loading…"] = "Carregando…",
+    ["Description"] = "Sinopse",
+    ["No description."] = "Sem sinopse.",
+    ["alternative publisher"] = "Outra editora",
+    ["alternative edition"] = "Outra edição",
+    ["alternative title"] = "Outro título",
+    ["alternative author"] = "Outro autor",
+    ["alternative description"] = "Outra sinopse",
 }
 
 local function tr(s, ...)
@@ -212,6 +220,124 @@ function ResultRow:onTap()
     return true
 end
 
+local Details = InputContainer:extend{
+    book = nil,
+    info = nil,
+    cover = nil,
+    plugin = nil,
+}
+
+function Details:init()
+    self.width = Screen:getWidth()
+    self.height = Screen:getHeight()
+    self.dimen = Geom:new{ x = 0, y = 0, w = self.width, h = self.height }
+    local book, info = self.book, self.info or {}
+    local pad = Size.padding.large * 2
+    local title_bar = TitleBar:new{
+        title = "",
+        width = self.width,
+        with_bottom_line = false,
+        close_callback = function() self:onClose() end,
+        show_parent = self,
+    }
+    local cover_w = math.floor(self.width * 0.36)
+    local cover_h = math.floor(cover_w * 3 / 2)
+    local cover
+    if self.cover then
+        cover = ImageWidget:new{ file = self.cover, width = cover_w, height = cover_h, scale_factor = 0 }
+    else
+        cover = FrameContainer:new{
+            width = cover_w, height = cover_h, padding = 0, bordersize = Size.border.thin,
+            CenterContainer:new{
+                dimen = Geom:new{ w = cover_w - 2 * Size.border.thin, h = cover_h - 2 * Size.border.thin },
+                TextWidget:new{ text = tr("no cover"), face = Font:getFace("cfont", 16), fgcolor = Blitbuffer.COLOR_DARK_GRAY },
+            },
+        }
+    end
+    local text_w = self.width - cover_w - 3 * pad
+    local side = VerticalGroup:new{
+        align = "left",
+        TextBoxWidget:new{ text = info.title or book.title or "", face = Font:getFace("tfont", 24), bold = true, width = text_w, height = math.floor(cover_h * 0.5), height_adjust = true, height_overflow_show_ellipsis = true },
+        VerticalSpan:new{ width = Size.span.vertical_large * 2 },
+        TextBoxWidget:new{ text = info.author or book.author or "", face = Font:getFace("cfont", 19), width = text_w, height = math.floor(cover_h * 0.18), height_adjust = true, height_overflow_show_ellipsis = true },
+        VerticalSpan:new{ width = Size.span.vertical_default },
+        TextWidget:new{ text = info.publisher or book.publisher or "", face = Font:getFace("cfont", 16), fgcolor = Blitbuffer.COLOR_DARK_GRAY, max_width = text_w },
+        VerticalSpan:new{ width = Size.span.vertical_default },
+        TextWidget:new{ text = infoLine(book), face = Font:getFace("cfont", 16), fgcolor = Blitbuffer.COLOR_DARK_GRAY, max_width = text_w },
+    }
+    local top = HorizontalGroup:new{
+        align = "top",
+        HorizontalSpan:new{ width = pad },
+        cover,
+        HorizontalSpan:new{ width = pad },
+        side,
+    }
+    local download = Button:new{
+        text = tr("Download"),
+        width = self.width - 2 * pad,
+        bordersize = Size.border.thick,
+        radius = Size.radius.button,
+        text_font_size = 22,
+        text_font_bold = true,
+        padding = Size.padding.large,
+        callback = function() NetworkMgr:runWhenOnline(function() self.plugin:download(book) end) end,
+        show_parent = self,
+    }
+    local lines = {}
+    local description = info.description
+    for _, f in ipairs(info.fields or {}) do
+        if (description == nil or description == "") and f[1] == "alternative description" then
+            description = f[2]
+        else
+            local label = tr(f[1])
+            lines[#lines + 1] = label:sub(1, 1):upper() .. label:sub(2) .. ": " .. f[2]
+        end
+    end
+    local body = (description and description ~= "") and description or tr("No description.")
+    if #lines > 0 then body = body .. "\n\n" .. table.concat(lines, "\n") end
+    local heading = TextWidget:new{ text = tr("Description"), face = Font:getFace("tfont", 20), bold = true }
+    local used = title_bar:getHeight() + cover_h + heading:getSize().h + download:getSize().h + 6 * Size.span.vertical_large + 2 * pad
+    local text = ScrollTextWidget:new{
+        text = body,
+        face = Font:getFace("cfont", 18),
+        width = self.width - 2 * pad,
+        height = math.max(Screen:scaleBySize(80), self.height - used),
+        dialog = self,
+    }
+    self[1] = FrameContainer:new{
+        width = self.width, height = self.height, padding = 0, bordersize = 0, background = Blitbuffer.COLOR_WHITE,
+        VerticalGroup:new{
+            align = "left",
+            title_bar,
+            top,
+            VerticalSpan:new{ width = Size.span.vertical_large * 3 },
+            HorizontalGroup:new{ HorizontalSpan:new{ width = pad }, heading },
+            VerticalSpan:new{ width = Size.span.vertical_large },
+            HorizontalGroup:new{ HorizontalSpan:new{ width = pad }, text },
+            VerticalSpan:new{ width = Size.span.vertical_large * 2 },
+            HorizontalGroup:new{ HorizontalSpan:new{ width = pad }, download },
+        },
+    }
+    if Device:isTouchDevice() then
+        self.ges_events.Swipe = { GestureRange:new{ ges = "swipe", range = self.dimen } }
+    end
+end
+
+function Details:onSwipe(_, ges)
+    if ges.direction == "south" or ges.direction == "east" then
+        return self:onClose()
+    end
+end
+
+function Details:onClose()
+    UIManager:close(self, "flashui")
+    return true
+end
+
+function Details:onShow()
+    UIManager:setDirty(self, "flashui")
+end
+
 local Results = InputContainer:extend{
     query = "",
     books = nil,
@@ -255,7 +381,7 @@ function Results:render()
             cover = self.plugin:coverPath(book),
             width = self.width,
             height = self.row_h,
-            callback = function(b) self.plugin:confirmDownload(b) end,
+            callback = function(b) self.plugin:showDetails(b) end,
         }
         list[#list + 1] = LineWidget:new{ dimen = Geom:new{ w = self.width, h = Size.line.thin }, background = Blitbuffer.COLOR_LIGHT_GRAY }
     end
@@ -510,13 +636,36 @@ function Bookos:fetchCovers(books, first, last, done)
     done()
 end
 
-function Bookos:confirmDownload(book)
-    UIManager:show(ConfirmBox:new{
-        text = tr("Download this book?") .. "\n\n" .. (book.title or "") .. "\n" .. (book.author or "") .. "\n" .. infoLine(book),
-        ok_text = tr("Download"),
-        cancel_text = tr("Cancel"),
-        ok_callback = function() NetworkMgr:runWhenOnline(function() self:download(book) end) end,
-    })
+function Bookos:showDetails(book)
+    local msg = InfoMessage:new{ text = tr("Loading…") }
+    UIManager:show(msg)
+    UIManager:forceRePaint()
+    local info
+    local code, body = request(server() .. "/book/" .. book.md5, nil, 60, 90)
+    if code == 200 then
+        local ok, data = pcall(JSON.decode, body)
+        if ok and type(data) == "table" then info = data end
+    elseif not code then
+        UIManager:close(msg)
+        return self:serverError(body)
+    end
+    local cover
+    local url = (info and info.cover_url) or book.cover_url
+    if type(url) == "string" then
+        local width = math.floor(Screen:getWidth() * 0.36)
+        cover = cacheDir() .. "/" .. book.md5 .. "_" .. width .. ".jpg"
+        if lfs.attributes(cover, "mode") ~= "file" then
+            local c = request(server() .. url .. "?w=" .. width, cover .. ".part", 20, 40)
+            if c == 200 then
+                os.rename(cover .. ".part", cover)
+            else
+                os.remove(cover .. ".part")
+                cover = self:coverPath(book)
+            end
+        end
+    end
+    UIManager:close(msg)
+    UIManager:show(Details:new{ book = book, info = info, cover = cover, plugin = self })
 end
 
 function Bookos:download(book)
