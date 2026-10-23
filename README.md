@@ -73,6 +73,7 @@ bookos search <terms...> [-f FORMAT] [-l LANG] [--by author|title] [-p PAGE] [-n
 | `-f, --format` | File format: `pdf`, `epub`, `mobi`, `azw3`, `djvu`… |
 | `-l, --lang` | Language code: `en`, `pt`, `es`… |
 | `--by` | Match the terms against the `author` or the `title` only |
+| `--sort` | Order: `newest`, `oldest`, `largest`, `smallest`, `newest_added`, `oldest_added`. With a sort the terms can be left out |
 | `-p, --page` | Results page from Anna's Archive (default 1) |
 | `-n, --max` | How many results to show (default 10) |
 | `--json` | Print results as JSON |
@@ -83,6 +84,31 @@ The terms can be a title, an author, an ISBN, or an md5. The results are saved t
 bookos search the left hand of darkness
 bookos search 9788525054463
 bookos search machado de assis -f epub -l pt -n 20
+```
+
+### Store
+
+```
+bookos store [shelf] [--refresh] [-n MAX] [--json]
+```
+
+Anna's Archive has no categories or best-seller lists, so the store builds shelves from other catalogs and keeps only the books it can download, in your language (`store_lang`, default `pt`) and in epub:
+
+| Shelf | Where the books come from |
+|---|---|
+| `new` | The newest additions to Anna's Archive in your language |
+| `brazilian-fiction`, `fantasy`, `mystery`, `russian-classics` | [Open Library](https://openlibrary.org) subjects, using the title of the edition in your language |
+| `more-<author>` | The authors you have most books by, read from the Kindle over ssh (or from the bookos downloads) |
+| your own | Lists in `~/.config/bookos/shelves` |
+
+Books you already have are left out. Without a shelf, `bookos store` lists the shelves. A shelf is built the first time you open it (it takes a minute or two, one search per book) and is cached for a day in `~/.cache/bookos/store`. The results are saved like a search, so `bookos download <number>` works after it.
+
+Your own shelves are plain text: a `#` line starts a shelf, and each line under it is `title | author`:
+
+```
+# Russian classics
+Crime e castigo | Dostoiévski
+Anna Kariênina | Tolstói
 ```
 
 ### Info
@@ -175,6 +201,8 @@ Runs a small HTTP server so an e-reader on the same network can search and downl
 | Endpoint | Answer |
 |---|---|
 | `GET /search?q=&format=&lang=&by=&page=&n=&w=` | JSON with `results`: md5, title, author, publisher, year, lang, ext, size, `cover_url` and `download_url`. With `w`, the covers are fetched in the background at that width, so the e-reader gets them from the cache |
+| `GET /store?w=` | Every shelf with its books, from the cache; shelves missing or older than a day are rebuilt in the background |
+| `GET /store/<id>?w=` | One shelf, built on the spot if needed |
 | `GET /book/<md5>` | The book with `description` and `fields` (other publishers, editions, titles), as in `bookos info --json` |
 | `GET /pages?isbn=&title=&author=&lang=&publisher=` | `pages` and the list of printed `editions`, as in `bookos pages --json`; `404` when none is found |
 | `GET /cover/<md5>.jpg?w=300` | The cover as a grayscale JPEG, `w` pixels wide (60 to 1236), cached in `~/.cache/bookos/covers` |
