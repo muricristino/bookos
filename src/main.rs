@@ -54,6 +54,12 @@ enum Cmd {
         /// Language: en, pt, es…
         #[arg(short, long)]
         lang: Option<String>,
+        /// Search only this field: author or title
+        #[arg(long, value_parser = ["author", "title"])]
+        by: Option<String>,
+        /// Results page
+        #[arg(short, long, default_value_t = 1)]
+        page: u32,
         /// How many results to show
         #[arg(short = 'n', long, default_value_t = 10)]
         max: usize,
@@ -285,13 +291,13 @@ fn fetch_book(book: &Book, dir: &std::path::Path, source: Option<String>, chrome
     bail!("could not download:\n  {}", errors.join("\n  "))
 }
 
-fn search(terms: &[String], format: Option<String>, lang: Option<String>, max: usize, json: bool, show: bool) -> Result<()> {
+fn search(terms: &[String], filters: aa::Filters, max: usize, json: bool, show: bool) -> Result<()> {
     let query = terms.join(" ");
     if query.trim().is_empty() {
         bail!("say what to search for: bookos search <title, author, isbn…>");
     }
     let chrome = Chrome::open(show)?;
-    let mut books = aa::search(&chrome, &query, format.as_deref(), lang.as_deref())?;
+    let mut books = aa::search(&chrome, &query, filters)?;
     drop(chrome);
     books.truncate(max);
     std::fs::create_dir_all(home().join(".config/bookos"))?;
@@ -374,7 +380,10 @@ fn main() {
     }
     let cli = Cli::parse();
     let result = match cli.cmd {
-        Cmd::Search { terms, format, lang, max, json } => search(&terms, format, lang, max, json, cli.show),
+        Cmd::Search { terms, format, lang, by, page, max, json } => {
+            let filters = aa::Filters { ext: format.as_deref(), lang: lang.as_deref(), field: by.as_deref(), page };
+            search(&terms, filters, max, json, cli.show)
+        }
         Cmd::Download { target, dir, source, kindle: false } => download(&target, dir, source, cli.show).map(|_| ()),
         Cmd::Download { target, dir, source, kindle: true } => {
             download(&target, dir, source, cli.show).and_then(|f| kindle::send(&f, None))

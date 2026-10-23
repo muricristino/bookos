@@ -98,8 +98,23 @@ fn parse_meta(book: &mut Book, meta: &str) {
     }
 }
 
-pub fn search(chrome: &Chrome, query: &str, ext: Option<&str>, lang: Option<&str>) -> Result<Vec<Book>> {
-    let mut url = format!("/search?q={}", encode(query));
+#[derive(Default, Clone, Copy)]
+pub struct Filters<'a> {
+    pub ext: Option<&'a str>,
+    pub lang: Option<&'a str>,
+    pub field: Option<&'a str>,
+    pub page: u32,
+}
+
+pub fn search(chrome: &Chrome, query: &str, filters: Filters) -> Result<Vec<Book>> {
+    let Filters { ext, lang, field, page } = filters;
+    let mut url = match field {
+        Some(f) => format!("/search?q=&termtype_1={}&termval_1={}", encode(f), encode(query)),
+        None => format!("/search?q={}", encode(query)),
+    };
+    if page > 1 {
+        url.push_str(&format!("&page={page}"));
+    }
     if let Some(e) = ext {
         url.push_str(&format!("&ext={}", encode(&e.to_lowercase())));
     }
@@ -139,7 +154,7 @@ pub fn search(chrome: &Chrome, query: &str, ext: Option<&str>, lang: Option<&str
 }
 
 pub fn lookup(chrome: &Chrome, md5: &str) -> Result<Book> {
-    let books = search(chrome, md5, None, None)?;
+    let books = search(chrome, md5, Filters::default())?;
     books.into_iter().find(|b| b.md5 == md5).with_context(|| format!("Anna's Archive did not find md5 {md5}"))
 }
 
