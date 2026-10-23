@@ -95,7 +95,13 @@ fn plan(kindle: &BTreeSet<String>, drive: &BTreeSet<String>, state: &BTreeSet<St
         if state.contains(f) { p.drop_kindle.push(f.clone()) } else { p.to_drive.push(f.clone()) }
     }
     for f in drive.difference(kindle) {
-        if state.contains(f) { p.drop_drive.push(f.clone()) } else { p.to_kindle.push(f.clone()) }
+        if state.contains(f) {
+            p.drop_drive.push(f.clone())
+        } else if f.contains([':', '*', '?', '"', '<', '>', '|', '\\']) {
+            eprintln!("skipped {f}: the Kindle's storage doesn't allow : * ? \" < > | in names");
+        } else {
+            p.to_kindle.push(f.clone())
+        }
     }
     p
 }
