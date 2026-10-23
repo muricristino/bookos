@@ -1,4 +1,5 @@
 use crate::aa::{self, Book};
+use crate::pages;
 use crate::chrome::Chrome;
 use crate::{fetch_book, file_name, home};
 use anyhow::{Context, Result, anyhow};
@@ -25,6 +26,7 @@ struct State {
     chrome: Mutex<Option<Chrome>>,
     books: Mutex<HashMap<String, Book>>,
     details: Mutex<HashMap<String, aa::Details>>,
+    pages: Mutex<HashMap<String, Value>>,
     jobs: Mutex<HashMap<String, Job>>,
     show: bool,
 }
@@ -37,7 +39,7 @@ fn cache_dir(sub: &str) -> PathBuf {
 
 pub fn run(bind: &str, port: u16, show: bool) -> Result<()> {
     let server = Server::http((bind, port)).map_err(|e| anyhow!("could not listen on {bind}:{port}: {e}"))?;
-    let state = Arc::new(State { chrome: Mutex::new(None), books: Mutex::new(HashMap::new()), details: Mutex::new(HashMap::new()), jobs: Mutex::new(HashMap::new()), show });
+    let state = Arc::new(State { chrome: Mutex::new(None), books: Mutex::new(HashMap::new()), details: Mutex::new(HashMap::new()), pages: Mutex::new(HashMap::new()), jobs: Mutex::new(HashMap::new()), show });
     eprintln!("bookos is serving on http://{bind}:{port}");
     for request in server.incoming_requests() {
         let state = state.clone();
@@ -57,6 +59,8 @@ fn handle(state: &Arc<State>, request: Request) {
     } else if let Some(rest) = path.strip_prefix("/cover/") {
         let width = params.get("w").and_then(|w| w.parse().ok()).unwrap_or(300u32).clamp(60, 1236);
         cover(state, rest.trim_end_matches(".jpg"), width)
+    } else if path == "/pages" {
+        page_count(state, &params)
     } else if let Some(md5) = path.strip_prefix("/book/") {
         book_details(state, md5)
     } else if let Some(md5) = path.strip_prefix("/download/") {
@@ -158,6 +162,26 @@ fn search(state: &State, params: &HashMap<String, String>) -> Result<Reply> {
         })
         .collect();
     Ok(json_reply(200, &json!({ "query": query, "results": results })))
+}
+
+fn page_count(state: &State, params: &HashMap<String, String>) -> Result<Reply> {
+    let param = |k: &str| params.get(k).map(|v| v.trim()).filter(|v| !v.is_empty());
+    let key = ["isbn", "title", "author", "lang", "publisher"].map(|k| param(k).unwrap_or("")).join("|");
+    if let Some(v) = state.pages.lock().map_err(|_| anyhow!("lock poisoned"))?.get(&key) {
+        return Ok(json_reply(200, v));
+    }
+    let q = pages::Query { isbn: param("isbn"), title: param("title"), author: param("author"), lang: param("lang"), publisher: param("publisher") };
+    match pages::find(q) {
+        Ok(found) => {
+            let mut v = serde_json::to_value(&found)?;
+            if let Some(list) = v["editions"].as_array_mut() {
+                list.truncate(20);
+            }
+            state.pages.lock().map_err(|_| anyhow!("lock poisoned"))?.insert(key, v.clone());
+            Ok(json_reply(200, &v))
+        }
+        Err(e) => Ok(json_reply(404, &json!({ "error": format!("{e:#}") }))),
+    }
 }
 
 fn book_details(state: &State, md5: &str) -> Result<Reply> {
