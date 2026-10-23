@@ -119,6 +119,12 @@ bookos config smtp_pass                   # asks for the password and keeps it i
 
 Add the `smtp_user` address to the **Approved Personal Document E-mail List** on that same Amazon page, or Amazon drops the email. The SMTP server is guessed for Gmail, Outlook, iCloud and Yahoo; set others with `bookos config smtp smtp.example.com:587`. `BOOKOS_SMTP_PASS` overrides the Keychain.
 
+To send with another mail tool instead of SMTP (for example an Outlook account that needs OAuth), set `mail_command`. `{to}`, `{subject}` and `{file}` are replaced, shell-quoted:
+
+```
+bookos config mail_command "mymailer --to {to} --subject {subject} --attach {file}"
+```
+
 ### Config
 
 ```
@@ -157,6 +163,7 @@ smtp=smtp.gmail.com:587
 | `libgen` | `libgen.li,libgen.gl,libgen.la,libgen.bz,libgen.vg` | Libgen mirrors, tried in order |
 | `kindle` | none | Your Send to Kindle email address |
 | `smtp_user` | none | Email account that sends to the Kindle |
+| `mail_command` | none | Shell command that sends the email instead of SMTP |
 | `smtp` | guessed from `smtp_user` | SMTP server as `host:port` (465 uses TLS, anything else STARTTLS) |
 
 ## How the Chrome part works
