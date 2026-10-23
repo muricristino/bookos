@@ -130,11 +130,19 @@ fn search(state: &State, params: &HashMap<String, String>) -> Result<Reply> {
     if query.is_empty() {
         return Ok(json_reply(400, &json!({ "error": "missing q" })));
     }
-    let format = params.get("format").filter(|f| !f.is_empty()).map(String::as_str);
-    let lang = params.get("lang").filter(|l| !l.is_empty()).map(String::as_str);
-    let max = params.get("n").and_then(|n| n.parse().ok()).unwrap_or(20usize);
-    let mut books = with_chrome(state, |c| aa::search(c, query, format, lang))?;
+    let param = |k: &str| params.get(k).map(String::as_str).filter(|v| !v.is_empty());
+    let filters = aa::Filters {
+        ext: param("format"),
+        lang: param("lang"),
+        field: param("by").filter(|f| ["author", "title"].contains(f)),
+        page: param("page").and_then(|p| p.parse().ok()).unwrap_or(1),
+    };
+    let max = param("n").and_then(|n| n.parse().ok()).unwrap_or(20usize);
+    let mut books = with_chrome(state, |c| aa::search(c, query, filters))?;
     books.truncate(max);
+    if let Some(width) = param("w").and_then(|w| w.parse().ok()) {
+        prefetch_covers(&books, width);
+    }
     let mut known = state.books.lock().map_err(|_| anyhow!("lock poisoned"))?;
     let results: Vec<Value> = books
         .iter()
@@ -170,19 +178,42 @@ fn cover(state: &State, md5: &str, width: u32) -> Result<Reply> {
         if book.cover.is_empty() {
             return Ok(json_reply(404, &json!({ "error": "no cover" })));
         }
-        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).build().into();
-        let mut resp = agent.get(&book.cover).header("User-Agent", "Mozilla/5.0").call().context("could not fetch the cover")?;
-        let raw = resp.body_mut().with_config().limit(20 * 1024 * 1024).read_to_vec()?;
-        let img = image::load_from_memory(&raw).context("the cover is not an image")?.grayscale();
-        let height = (img.height() as u64 * width as u64 / img.width().max(1) as u64).max(1) as u32;
-        let img = img.resize_exact(width, height, FilterType::Lanczos3);
-        let mut out = Vec::new();
-        JpegEncoder::new_with_quality(&mut out, 85).encode_image(&img)?;
-        fs::write(&path, out)?;
+        save_cover(&book, width, &path)?;
     }
     let file = File::open(&path)?;
     let len = file.metadata()?.len() as usize;
     Ok(Response::new(200.into(), vec![header("Content-Type", "image/jpeg"), header("Cache-Control", "max-age=604800")], Box::new(file), Some(len), None))
+}
+
+fn prefetch_covers(books: &[Book], width: u32) {
+    let queue: Vec<Book> = books.iter().filter(|b| !b.cover.is_empty() && valid_md5(&b.md5)).cloned().collect();
+    let queue = Arc::new(Mutex::new(queue));
+    for _ in 0..8 {
+        let queue = queue.clone();
+        thread::spawn(move || {
+            while let Some(book) = queue.lock().ok().and_then(|mut q| q.pop()) {
+                let path = cache_dir("covers").join(format!("{}_{width}.jpg", book.md5));
+                if !path.exists() {
+                    let _ = fs::create_dir_all(cache_dir("covers")).map_err(anyhow::Error::from).and_then(|_| save_cover(&book, width, &path));
+                }
+            }
+        });
+    }
+}
+
+fn save_cover(book: &Book, width: u32, path: &std::path::Path) -> Result<()> {
+    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(30))).build().into();
+    let mut resp = agent.get(&book.cover).header("User-Agent", "Mozilla/5.0").call().context("could not fetch the cover")?;
+    let raw = resp.body_mut().with_config().limit(20 * 1024 * 1024).read_to_vec()?;
+    let img = image::load_from_memory(&raw).context("the cover is not an image")?.grayscale();
+    let height = (img.height() as u64 * width as u64 / img.width().max(1) as u64).max(1) as u32;
+    let img = img.resize_exact(width, height, FilterType::Lanczos3);
+    let mut out = Vec::new();
+    JpegEncoder::new_with_quality(&mut out, 85).encode_image(&img)?;
+    let part = path.with_extension("part");
+    fs::write(&part, out)?;
+    fs::rename(&part, path)?;
+    Ok(())
 }
 
 fn content_type(ext: &str) -> &'static str {
