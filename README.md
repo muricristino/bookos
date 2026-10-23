@@ -93,6 +93,14 @@ bookos info <n|md5> [--json]
 
 Shows a book's page from Anna's Archive: title, author, publisher, the description, and other publishers, editions and titles it is known by.
 
+### Pages
+
+```
+bookos pages [n|md5] [--isbn ISBN] [--title T] [--author A] [-l LANG] [--publisher P] [--json]
+```
+
+Finds how many pages the printed book has, from [Open Library](https://openlibrary.org). With an ISBN it starts from that exact edition; otherwise it looks the title up and lists the editions in that language with a page count, putting first the one from the same publisher, or else the one closest to the median. A result number or md5 fills in the title, author, language and publisher.
+
 ### Download
 
 ```
@@ -168,6 +176,7 @@ Runs a small HTTP server so an e-reader on the same network can search and downl
 |---|---|
 | `GET /search?q=&format=&lang=&by=&page=&n=&w=` | JSON with `results`: md5, title, author, publisher, year, lang, ext, size, `cover_url` and `download_url`. With `w`, the covers are fetched in the background at that width, so the e-reader gets them from the cache |
 | `GET /book/<md5>` | The book with `description` and `fields` (other publishers, editions, titles), as in `bookos info --json` |
+| `GET /pages?isbn=&title=&author=&lang=&publisher=` | `pages` and the list of printed `editions`, as in `bookos pages --json`; `404` when none is found |
 | `GET /cover/<md5>.jpg?w=300` | The cover as a grayscale JPEG, `w` pixels wide (60 to 1236), cached in `~/.cache/bookos/covers` |
 | `GET /download/<md5>` | `202` with JSON progress (`state`, `bytes`, `size`) while the server downloads; ask again until it answers `200` with the md5-checked file |
 
@@ -181,6 +190,8 @@ Downloads made through the server are kept in `~/.cache/bookos/downloads`.
 2. Run `bookos serve` on a computer on the same network.
 3. In KOReader, open the search menu › bookos › Server address, and enter `http://<computer ip>:8337`.
 4. Search from the same menu. The search is also a Dispatcher action, so it can be bound to a gesture. With [SimpleUI](https://github.com/doctorhetfield-cmd/simpleui.koplugin), it registers a `bookos_search` quick action that can go in the bottom bar.
+
+When a book opens for the first time, the plugin asks the server how many pages the printed edition has (by the ISBN in the epub, or else by title, author and language) and numbers the pages to match it: KOReader's stable page numbers are turned on with the characters per page tuned so the book ends on the printed page count, and the status bar shows "page / printed pages". Books with publisher page numbers keep them. In the reader, bookos › Physical book pages lists the printed editions found, to pick another one or turn it off.
 
 The plugin speaks Portuguese when KOReader is set to Portuguese, and English otherwise.
 
