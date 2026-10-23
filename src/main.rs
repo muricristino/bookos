@@ -66,6 +66,13 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Show a book's details: description, publishers, editions…
+    Info {
+        /// A result number from the last search, or an md5
+        target: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Download by result number from the last search, or by md5
     Download {
         target: String,
@@ -296,6 +303,36 @@ fn fetch_book(book: &Book, dir: &std::path::Path, source: Option<String>, chrome
     bail!("could not download:\n  {}", errors.join("\n  "))
 }
 
+fn info(target: &str, json: bool, show: bool) -> Result<()> {
+    let mut chrome = None;
+    let md5 = if target.len() == 32 && target.chars().all(|c| c.is_ascii_hexdigit()) { target.to_lowercase() } else { resolve_target(target, &mut chrome, show)?.md5 };
+    let d = aa::details(open_chrome(&mut chrome, show)?, &md5)?;
+    drop(chrome);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&d)?);
+        return Ok(());
+    }
+    println!("{}", d.book.title);
+    for line in [&d.book.author, &d.book.publisher] {
+        if !line.is_empty() {
+            println!("{line}");
+        }
+    }
+    let info: Vec<&str> = [&d.book.year, &d.book.lang, &d.book.ext, &d.book.size].into_iter().filter(|s| !s.is_empty()).map(String::as_str).collect();
+    println!("{}", info.join(" · "));
+    if !d.description.is_empty() {
+        println!("\n{}", d.description);
+    }
+    if !d.fields.is_empty() {
+        println!();
+        for (label, value) in &d.fields {
+            println!("{label}: {value}");
+        }
+    }
+    println!("\nmd5 {md5}");
+    Ok(())
+}
+
 fn search(terms: &[String], filters: aa::Filters, max: usize, json: bool, show: bool) -> Result<()> {
     let query = terms.join(" ");
     if query.trim().is_empty() {
@@ -385,6 +422,7 @@ fn main() {
     }
     let cli = Cli::parse();
     let result = match cli.cmd {
+        Cmd::Info { target, json } => info(&target, json, cli.show),
         Cmd::Search { terms, format, lang, by, page, max, json } => {
             let filters = aa::Filters { ext: format.as_deref(), lang: lang.as_deref(), field: by.as_deref(), page };
             search(&terms, filters, max, json, cli.show)

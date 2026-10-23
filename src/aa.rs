@@ -216,3 +216,52 @@ pub fn slow_link(chrome: &Chrome, md5: &str, server: u32) -> Result<String> {
         }
     }
 }
+
+const DETAILS_JS: &str = r#"JSON.stringify((() => {
+  const box = document.querySelector('.js-md5-top-box-description');
+  const fields = [];
+  if (box) {
+    const kids = [...box.children];
+    for (let i = 0; i + 1 < kids.length; i++) {
+      if (kids[i].classList.contains('uppercase')) fields.push([kids[i].textContent.trim().toLowerCase(), kids[i + 1].textContent.trim()]);
+    }
+  }
+  const icon = n => { const s = document.querySelector('main [class*="mdi--' + n + '"]'); return s ? s.parentElement.textContent.trim() : '' };
+  const title = document.querySelector('main div.text-2xl');
+  const meta = document.querySelector('main div.text-gray-800');
+  const img = document.querySelector('main img[src^="http"]');
+  return { title: title ? title.firstChild.textContent.trim() : '', author: icon('user-edit'), publisher: icon('company'), meta: meta ? meta.textContent.trim() : '', cover: img ? img.src : '', fields };
+})())"#;
+
+#[derive(Serialize, Clone, Debug, Default)]
+pub struct Details {
+    #[serde(flatten)]
+    pub book: Book,
+    pub description: String,
+    pub fields: Vec<(String, String)>,
+}
+
+pub fn details(chrome: &Chrome, md5: &str) -> Result<Details> {
+    let tab = open(chrome, &format!("/md5/{md5}"))?;
+    let v = tab.eval_json(DETAILS_JS)?;
+    let s = |k: &str| v[k].as_str().unwrap_or("").trim().to_string();
+    if s("title").is_empty() {
+        bail!("Anna's Archive has no page for md5 {md5}");
+    }
+    let mut book = Book { md5: md5.to_string(), title: s("title"), author: s("author"), publisher: s("publisher"), cover: s("cover"), ..Default::default() };
+    parse_meta(&mut book, &s("meta"));
+    let mut details = Details { book, ..Default::default() };
+    for pair in v["fields"].as_array().into_iter().flatten() {
+        let label = pair[0].as_str().unwrap_or("").to_string();
+        let value = pair[1].as_str().unwrap_or("").split_whitespace().collect::<Vec<_>>().join(" ");
+        if value.is_empty() || label.contains("filename") || label.contains("open sourced") || label.contains("metadata comments") {
+            continue;
+        }
+        if label == "description" && details.description.is_empty() {
+            details.description = value;
+        } else if !details.fields.iter().any(|(l, v)| *l == label && *v == value) {
+            details.fields.push((label, value));
+        }
+    }
+    Ok(details)
+}
