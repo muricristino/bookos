@@ -197,8 +197,12 @@ fn download(target: &str, dir: Option<PathBuf>, source: Option<String>, show: bo
     let mut chrome: Option<Chrome> = None;
     let book = resolve_target(target, &mut chrome, show)?;
     let dir = dir.or_else(|| config("dir").map(|p| expand(&p))).unwrap_or_else(|| home().join("Downloads"));
-    std::fs::create_dir_all(&dir)?;
-    let dest = dir.join(file_name(&book));
+    fetch_book(&book, &dir, source, &mut chrome, show)
+}
+
+fn fetch_book(book: &Book, dir: &std::path::Path, source: Option<String>, chrome: &mut Option<Chrome>, show: bool) -> Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let dest = dir.join(file_name(book));
     if dest.exists() {
         println!("already downloaded: {}", dest.display());
         return Ok(dest);
@@ -219,7 +223,7 @@ fn download(target: &str, dir: Option<PathBuf>, source: Option<String>, show: bo
             },
             "libgen" => vec![libgen::link(&book.md5)],
             "aa-slow" => {
-                let c = match open_chrome(&mut chrome, show) {
+                let c = match open_chrome(chrome, show) {
                     Ok(c) => c,
                     Err(e) => {
                         errors.push(format!("aa-slow: {e}"));
