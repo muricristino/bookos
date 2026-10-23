@@ -3,6 +3,7 @@ mod chrome;
 mod download;
 mod kindle;
 mod libgen;
+mod pages;
 mod serve;
 
 use aa::Book;
@@ -70,6 +71,24 @@ enum Cmd {
     Info {
         /// A result number from the last search, or an md5
         target: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Find how many pages the printed book has (Open Library), to number pages like the paper edition
+    Pages {
+        /// A result number from the last search, or an md5
+        target: Option<String>,
+        #[arg(long)]
+        isbn: Option<String>,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        author: Option<String>,
+        /// Language code of the edition: pt, en…
+        #[arg(short, long)]
+        lang: Option<String>,
+        #[arg(long)]
+        publisher: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -333,6 +352,28 @@ fn info(target: &str, json: bool, show: bool) -> Result<()> {
     Ok(())
 }
 
+fn pages_cmd(target: Option<&str>, flags: pages::Query, json: bool, show: bool) -> Result<()> {
+    let book = target.map(|t| resolve_target(t, &mut None, show)).transpose()?;
+    let from = |flag: Option<&str>, field: fn(&Book) -> &str| flag.map(String::from).or_else(|| book.as_ref().map(field).filter(|s| !s.is_empty()).map(String::from));
+    let title = from(flags.title, |b| &b.title);
+    let author = from(flags.author, |b| &b.author);
+    let lang = from(flags.lang, |b| &b.lang);
+    let publisher = from(flags.publisher, |b| &b.publisher);
+    let q = pages::Query { isbn: flags.isbn, title: title.as_deref(), author: author.as_deref(), lang: lang.as_deref(), publisher: publisher.as_deref() };
+    let found = pages::find(q)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&found)?);
+        return Ok(());
+    }
+    println!("{} pages", found.pages);
+    println!();
+    for e in found.editions.iter().take(15) {
+        let extra: Vec<&str> = [&e.publisher, &e.year, &e.isbn].into_iter().filter(|s| !s.is_empty()).map(String::as_str).collect();
+        println!("{:>5}  {}  {}", e.pages, e.title, extra.join(" · "));
+    }
+    Ok(())
+}
+
 fn search(terms: &[String], filters: aa::Filters, max: usize, json: bool, show: bool) -> Result<()> {
     let query = terms.join(" ");
     if query.trim().is_empty() {
@@ -423,6 +464,10 @@ fn main() {
     let cli = Cli::parse();
     let result = match cli.cmd {
         Cmd::Info { target, json } => info(&target, json, cli.show),
+        Cmd::Pages { target, isbn, title, author, lang, publisher, json } => {
+            let flags = pages::Query { isbn: isbn.as_deref(), title: title.as_deref(), author: author.as_deref(), lang: lang.as_deref(), publisher: publisher.as_deref() };
+            pages_cmd(target.as_deref(), flags, json, cli.show)
+        }
         Cmd::Search { terms, format, lang, by, page, max, json } => {
             let filters = aa::Filters { ext: format.as_deref(), lang: lang.as_deref(), field: by.as_deref(), page };
             search(&terms, filters, max, json, cli.show)
