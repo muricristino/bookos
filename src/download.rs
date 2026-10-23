@@ -96,3 +96,10 @@ pub fn fetch(url: &str, dest: &Path, expected_md5: &str) -> Result<()> {
     fs::rename(&part, dest)?;
     Ok(())
 }
+
+pub fn file_md5(path: &Path) -> Result<String> {
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Md5::new();
+    std::io::copy(&mut file, &mut hasher)?;
+    Ok(format!("{:x}", hasher.finalize()))
+}

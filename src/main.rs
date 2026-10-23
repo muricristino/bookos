@@ -218,7 +218,12 @@ fn download(target: &str, dir: Option<PathBuf>, source: Option<String>, show: bo
 
 fn fetch_book(book: &Book, dir: &std::path::Path, source: Option<String>, chrome: &mut Option<Chrome>, show: bool) -> Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
-    let dest = dir.join(file_name(book));
+    let mut dest = dir.join(file_name(book));
+    if dest.exists() && download::file_md5(&dest).is_ok_and(|m| m != book.md5) {
+        let name = file_name(book);
+        let (stem, ext) = name.rsplit_once('.').unwrap_or((&name, "bin"));
+        dest = dir.join(format!("{stem} [{}].{ext}", &book.md5[..8]));
+    }
     if dest.exists() {
         println!("already downloaded: {}", dest.display());
         return Ok(dest);
