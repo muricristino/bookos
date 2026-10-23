@@ -5,6 +5,7 @@ mod kindle;
 mod libgen;
 mod pages;
 mod serve;
+mod store;
 
 use aa::Book;
 use anyhow::{Context, Result, bail};
@@ -92,6 +93,19 @@ enum Cmd {
         lang: Option<String>,
         #[arg(long)]
         publisher: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Browse shelves of books ready to download: new arrivals, genres, more by your authors, your own lists
+    Store {
+        /// A shelf id; without it, list the shelves
+        shelf: Option<String>,
+        /// Rebuild the shelf (or every shelf) instead of using the day-old cache
+        #[arg(long)]
+        refresh: bool,
+        /// How many books per shelf
+        #[arg(short = 'n', long, default_value_t = 12)]
+        max: usize,
         #[arg(long)]
         json: bool,
     },
@@ -325,6 +339,56 @@ fn fetch_book(book: &Book, dir: &std::path::Path, source: Option<String>, chrome
     bail!("could not download:\n  {}", errors.join("\n  "))
 }
 
+fn store_cmd(shelf: Option<&str>, refresh: bool, max: usize, json: bool, show: bool) -> Result<()> {
+    let mut chrome: Option<Chrome> = None;
+    let mut stock = |s: &store::Shelf| -> Result<store::Stocked> {
+        if !refresh && let Some(c) = store::cached(&s.id).filter(store::is_fresh) {
+            return Ok(c);
+        }
+        eprintln!("stocking {}…", s.title);
+        let c = open_chrome(&mut chrome, show)?;
+        store::build(s, &|q, f| aa::search(c, q, f), max)
+    };
+    let Some(id) = shelf else {
+        let shelves = store::shelves();
+        if refresh {
+            for s in &shelves {
+                if let Err(e) = stock(s) {
+                    eprintln!("  {}: {e:#}", s.id);
+                }
+            }
+        }
+        if json {
+            let list: Vec<_> = shelves.iter().map(|s| serde_json::json!({ "id": s.id, "title": s.title, "stocked": store::cached(&s.id) })).collect();
+            println!("{}", serde_json::to_string_pretty(&list)?);
+            return Ok(());
+        }
+        let width = shelves.iter().map(|s| s.id.len()).max().unwrap_or(0);
+        for s in &shelves {
+            let state = match store::cached(&s.id) {
+                Some(c) => format!("{} books, {}", c.books.len(), store::age(&c)),
+                None => "not stocked yet".into(),
+            };
+            println!("{:width$}  {}  ({state})", s.id, s.title);
+        }
+        println!("\nopen one with: bookos store <id>");
+        return Ok(());
+    };
+    let stocked = stock(&store::find(id)?)?;
+    std::fs::create_dir_all(home().join(".config/bookos"))?;
+    std::fs::write(last_search_path(), serde_json::to_string_pretty(&stocked.books)?)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&stocked)?);
+    } else if stocked.books.is_empty() {
+        println!("{}: nothing found", stocked.title);
+    } else {
+        println!("{} · {}\n", stocked.title, store::age(&stocked));
+        print_books(&stocked.books);
+        println!("\ndownload with: bookos download <number>");
+    }
+    Ok(())
+}
+
 fn info(target: &str, json: bool, show: bool) -> Result<()> {
     let mut chrome = None;
     let md5 = if target.len() == 32 && target.chars().all(|c| c.is_ascii_hexdigit()) { target.to_lowercase() } else { resolve_target(target, &mut chrome, show)?.md5 };
@@ -466,6 +530,7 @@ fn main() {
     }
     let cli = Cli::parse();
     let result = match cli.cmd {
+        Cmd::Store { shelf, refresh, max, json } => store_cmd(shelf.as_deref(), refresh, max, json, cli.show),
         Cmd::Info { target, json } => info(&target, json, cli.show),
         Cmd::Pages { target, isbn, title, author, lang, publisher, json } => {
             let flags = pages::Query { isbn: isbn.as_deref(), title: title.as_deref(), author: author.as_deref(), lang: lang.as_deref(), publisher: publisher.as_deref() };
