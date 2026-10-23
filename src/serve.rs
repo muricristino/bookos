@@ -1,6 +1,7 @@
 use crate::aa::{self, Book};
-use crate::pages;
 use crate::chrome::Chrome;
+use crate::pages;
+use crate::store;
 use crate::{fetch_book, file_name, home};
 use anyhow::{Context, Result, anyhow};
 use image::codecs::jpeg::JpegEncoder;
@@ -28,6 +29,7 @@ struct State {
     details: Mutex<HashMap<String, aa::Details>>,
     pages: Mutex<HashMap<String, Value>>,
     jobs: Mutex<HashMap<String, Job>>,
+    stocking: Mutex<bool>,
     show: bool,
 }
 
@@ -39,7 +41,7 @@ fn cache_dir(sub: &str) -> PathBuf {
 
 pub fn run(bind: &str, port: u16, show: bool) -> Result<()> {
     let server = Server::http((bind, port)).map_err(|e| anyhow!("could not listen on {bind}:{port}: {e}"))?;
-    let state = Arc::new(State { chrome: Mutex::new(None), books: Mutex::new(HashMap::new()), details: Mutex::new(HashMap::new()), pages: Mutex::new(HashMap::new()), jobs: Mutex::new(HashMap::new()), show });
+    let state = Arc::new(State { chrome: Mutex::new(None), books: Mutex::new(HashMap::new()), details: Mutex::new(HashMap::new()), pages: Mutex::new(HashMap::new()), jobs: Mutex::new(HashMap::new()), stocking: Mutex::new(false), show });
     eprintln!("bookos is serving on http://{bind}:{port}");
     for request in server.incoming_requests() {
         let state = state.clone();
@@ -61,6 +63,10 @@ fn handle(state: &Arc<State>, request: Request) {
         cover(state, rest.trim_end_matches(".jpg"), width)
     } else if path == "/pages" {
         page_count(state, &params)
+    } else if path == "/store" {
+        store_list(state, &params)
+    } else if let Some(id) = path.strip_prefix("/store/") {
+        store_shelf(state, id, &params)
     } else if let Some(md5) = path.strip_prefix("/book/") {
         book_details(state, md5)
     } else if let Some(md5) = path.strip_prefix("/download/") {
@@ -208,6 +214,73 @@ fn book_details(state: &State, md5: &str) -> Result<Reply> {
     v["cover_url"] = if details.book.cover.is_empty() { Value::Null } else { json!(format!("/cover/{md5}.jpg")) };
     v["download_url"] = json!(format!("/download/{md5}"));
     Ok(json_reply(200, &v))
+}
+
+fn shelf_json(state: &State, stocked: &store::Stocked, width: Option<u32>) -> Result<Value> {
+    if let Some(w) = width {
+        prefetch_covers(&stocked.books, w);
+    }
+    let mut known = state.books.lock().map_err(|_| anyhow!("lock poisoned"))?;
+    let books: Vec<Value> = stocked
+        .books
+        .iter()
+        .map(|b| {
+            known.insert(b.md5.clone(), b.clone());
+            let mut v = serde_json::to_value(b).unwrap_or(Value::Null);
+            v["cover_url"] = if b.cover.is_empty() { Value::Null } else { json!(format!("/cover/{}.jpg", b.md5)) };
+            v["download_url"] = json!(format!("/download/{}", b.md5));
+            v
+        })
+        .collect();
+    Ok(json!({ "id": stocked.id, "title": stocked.title, "built": stocked.built, "books": books }))
+}
+
+fn stock_in_background(state: &Arc<State>, shelves: Vec<store::Shelf>) {
+    {
+        let Ok(mut busy) = state.stocking.lock() else { return };
+        if *busy || shelves.is_empty() {
+            return;
+        }
+        *busy = true;
+    }
+    let state = state.clone();
+    thread::spawn(move || {
+        for shelf in shelves {
+            eprintln!("stocking {}…", shelf.title);
+            if let Err(e) = store::build(&shelf, &|q, f| with_chrome(&state, |c| aa::search(c, q, f)), 12) {
+                eprintln!("  {}: {e:#}", shelf.id);
+            }
+        }
+        if let Ok(mut busy) = state.stocking.lock() {
+            *busy = false;
+        }
+    });
+}
+
+fn store_list(state: &Arc<State>, params: &HashMap<String, String>) -> Result<Reply> {
+    let width = params.get("w").and_then(|w| w.parse().ok());
+    let shelves = store::shelves();
+    let stale: Vec<store::Shelf> = shelves.iter().filter(|s| store::cached(&s.id).is_none_or(|c| !store::is_fresh(&c))).cloned().collect();
+    stock_in_background(state, stale);
+    let mut list = Vec::new();
+    for s in &shelves {
+        match store::cached(&s.id) {
+            Some(c) if !c.books.is_empty() => list.push(shelf_json(state, &c, width)?),
+            Some(_) => {}
+            None => list.push(json!({ "id": s.id, "title": s.title, "books": [], "stocking": true })),
+        }
+    }
+    Ok(json_reply(200, &json!({ "shelves": list })))
+}
+
+fn store_shelf(state: &Arc<State>, id: &str, params: &HashMap<String, String>) -> Result<Reply> {
+    let width = params.get("w").and_then(|w| w.parse().ok());
+    let shelf = store::find(id)?;
+    let stocked = match store::cached(&shelf.id).filter(store::is_fresh) {
+        Some(c) => c,
+        None => store::build(&shelf, &|q, f| with_chrome(state, |c| aa::search(c, q, f)), 12)?,
+    };
+    Ok(json_reply(200, &shelf_json(state, &stocked, width)?))
 }
 
 fn book_for(state: &State, md5: &str) -> Result<Book> {
