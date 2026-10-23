@@ -30,7 +30,7 @@ saved to ~/Downloads/de Assis, Machado - Dom Casmurro (Prazer de Ler) (Portugues
 
 ## What it does
 
-- **Search** goes through Anna's Archive, which indexes Libgen (.rs and .li), Z-Library, Sci-Hub, the Internet Archive lending library, DuXiu, HathiTrust and direct uploads. Each result shows title, author, year, language, format, size, the collections that hold the file, and its md5.
+- **Search** goes through Anna's Archive, which indexes Libgen (.rs and .li), Z-Library, Sci-Hub, the Internet Archive lending library, DuXiu, HathiTrust and direct uploads. Each result shows title, author, publisher, year, language, format, size, the collections that hold the file, and its md5.
 - **Download** identifies a file by its md5 (the same across all these libraries) and tries the sources in order until one works:
   1. `aa-fast`: the official Anna's Archive fast download API. Needs a membership secret key; skipped otherwise.
   2. `aa-slow`: the free "slow partner server" download. It runs through Chrome, waits out the queue countdown, grabs the signed download link and fetches the file over plain HTTP.
@@ -100,6 +100,33 @@ bookos download 7efc25320899bd1151b6ef1c8d41b6cc    # any md5, looked up on Anna
 bookos download 1 -d ~/Books --source libgen
 ```
 
+### Send to Kindle
+
+```
+bookos kindle <file|number|md5> [--via email|usb] [-d DIR]
+bookos download <number|md5> --kindle
+```
+
+A number or md5 is downloaded first. With a Kindle plugged in over USB and a format it reads (`mobi`, `azw3`, `pdf`, `txt`), the file is copied into its `documents` folder. Otherwise it goes by email to your Send to Kindle address, which takes `epub`, `pdf`, `txt`, `docx`, `rtf`, `html` and images up to 50 MB (not `mobi` or `azw3` anymore).
+
+One-time setup for email:
+
+```
+bookos config kindle you@kindle.com       # Amazon › Manage Content and Devices › Preferences › Personal Document Settings
+bookos config smtp_user you@gmail.com     # the account that sends; for Gmail use an app password
+bookos config smtp_pass                   # asks for the password and keeps it in the macOS Keychain
+```
+
+Add the `smtp_user` address to the **Approved Personal Document E-mail List** on that same Amazon page, or Amazon drops the email. The SMTP server is guessed for Gmail, Outlook, iCloud and Yahoo; set others with `bookos config smtp smtp.example.com:587`. `BOOKOS_SMTP_PASS` overrides the Keychain.
+
+### Config
+
+```
+bookos config                  # print the config
+bookos config dir              # print one key
+bookos config dir ~/Books      # set a key
+```
+
 ### Global flag
 
 | Flag | Description |
@@ -116,6 +143,9 @@ dir=~/Books
 sources=aa-fast,aa-slow,libgen
 domain=annas-archive.gl,annas-archive.pk,annas-archive.gd
 libgen=libgen.li,libgen.gl,libgen.la,libgen.bz,libgen.vg
+kindle=you@kindle.com
+smtp_user=you@gmail.com
+smtp=smtp.gmail.com:587
 ```
 
 | Key | Default | Description |
@@ -125,6 +155,9 @@ libgen=libgen.li,libgen.gl,libgen.la,libgen.bz,libgen.vg
 | `sources` | `aa-fast,aa-slow,libgen` | Source order |
 | `domain` | `annas-archive.gl,annas-archive.pk,annas-archive.gd` | Anna's Archive domains, tried in order |
 | `libgen` | `libgen.li,libgen.gl,libgen.la,libgen.bz,libgen.vg` | Libgen mirrors, tried in order |
+| `kindle` | none | Your Send to Kindle email address |
+| `smtp_user` | none | Email account that sends to the Kindle |
+| `smtp` | guessed from `smtp_user` | SMTP server as `host:port` (465 uses TLS, anything else STARTTLS) |
 
 ## How the Chrome part works
 
