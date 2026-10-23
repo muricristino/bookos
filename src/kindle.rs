@@ -147,3 +147,24 @@ fn run_mail_command(command: &str, to: &str, file: &Path) -> Result<()> {
     println!("sent to {to}");
     Ok(())
 }
+
+pub fn verify(link: &str) -> Result<()> {
+    if !link.starts_with("https://www.amazon.") || !link.contains("/sendtokindle/verification/") {
+        bail!("that is not a Send to Kindle verification link");
+    }
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).build().into();
+    let mut resp = agent
+        .get(link)
+        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/141 Safari/537.36")
+        .call()
+        .context("could not reach Amazon")?;
+    let html = resp.body_mut().read_to_string()?;
+    let text = html.split('<').filter_map(|t| t.split_once('>').map(|(_, s)| s.trim())).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ");
+    let lower = text.to_lowercase();
+    if lower.contains("verificad") || lower.contains("verified") {
+        println!("verified: Amazon is delivering the book");
+        Ok(())
+    } else {
+        bail!("Amazon did not confirm the request (HTTP {}); open the link in a browser", resp.status())
+    }
+}

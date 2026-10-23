@@ -82,6 +82,8 @@ enum Cmd {
         #[arg(short, long)]
         dir: Option<PathBuf>,
     },
+    /// Confirm a Send to Kindle request from the link in Amazon's "verify your request" email
+    Verify { link: String },
     /// Show or change the config: no args lists it, one shows a key, two set it
     Config {
         key: Option<String>,
@@ -364,6 +366,7 @@ fn main() {
         }
         Cmd::Kindle { target, via, dir } => kindle(&target, via.as_deref(), dir, cli.show),
         Cmd::Config { key, value } => config_cmd(key, value),
+        Cmd::Verify { link } => kindle::verify(&link),
     };
     if let Err(e) = result {
         eprintln!("error: {e:#}");
