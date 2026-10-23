@@ -27,6 +27,8 @@ use std::process::exit;
   kindle=you@kindle.com                           Send to Kindle address
   smtp_user=you@gmail.com                         account that emails the Kindle
   smtp=smtp.gmail.com:587                         SMTP server (guessed for Gmail, Outlook, iCloud, Yahoo)
+  mail_command=<shell command>                    send with another tool instead of SMTP;
+                                                  {to}, {subject} and {file} are replaced
 
 Set them with `bookos config <key> <value>`. The SMTP password goes to the Keychain:
 `bookos config smtp_pass` (or BOOKOS_SMTP_PASS)."

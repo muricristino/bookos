@@ -89,6 +89,9 @@ fn email(file: &Path, ext: &str) -> Result<()> {
         bail!("the file is {} MB; Send to Kindle by email takes up to 50 MB", size / 1_048_576);
     }
     let to = config("kindle").context("set your Send to Kindle address: bookos config kindle you@kindle.com")?;
+    if let Some(command) = config("mail_command") {
+        return run_mail_command(&command, &to, file);
+    }
     let user = config("smtp_user").context("set the email account that sends: bookos config smtp_user you@gmail.com")?;
     let (host, port) = smtp_server(&user)?;
     let pass = password(&user)?;
@@ -123,5 +126,24 @@ fn email(file: &Path, ext: &str) -> Result<()> {
     transport.send(&message).with_context(|| format!("{host}:{port} refused the email"))?;
     println!("sent to {to}");
     println!("if it doesn't show up, add {user} to the approved senders in Amazon's Personal Document Settings");
+    Ok(())
+}
+
+fn quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+fn run_mail_command(command: &str, to: &str, file: &Path) -> Result<()> {
+    let subject = file.file_stem().and_then(|n| n.to_str()).unwrap_or("book");
+    let command = command
+        .replace("{to}", &quote(to))
+        .replace("{subject}", &quote(subject))
+        .replace("{file}", &quote(&file.to_string_lossy()));
+    eprintln!("sending to {to} with mail_command…");
+    let status = std::process::Command::new("sh").arg("-c").arg(&command).status().context("could not run mail_command")?;
+    if !status.success() {
+        bail!("mail_command failed ({status})");
+    }
+    println!("sent to {to}");
     Ok(())
 }
