@@ -456,8 +456,28 @@ local Bookos = WidgetContainer:extend{
 
 local current
 
+local Library = require("bookos_library")
+Library.setup{
+    server = server,
+    request = request,
+    cacheDir = cacheDir,
+    search = function() if current then current:search() end end,
+    details = function(book) if current then current:showDetails(book) end end,
+    editServer = function() if current then current:editServer() end end,
+    showList = function(title, books)
+        if not current then return end
+        local results = Results:new{ query = title, books = books, plugin = current }
+        current:fetchCovers(books, 1, results.per_page, function()
+            results:render()
+            UIManager:show(results)
+        end)
+    end,
+}
+
 function Bookos:init()
     current = self
+    local ok_reg, Registry = pcall(require, "modules/moduleregistry")
+    if ok_reg and type(Registry) == "table" and Registry.register then Registry.register(Library) end
     Dispatcher:registerAction("bookos_search", { category = "none", event = "BookosSearch", title = tr("Search books"), general = true })
     self.ui.menu:registerToMainMenu(self)
     self:registerQuickAction()
@@ -885,6 +905,7 @@ function Bookos:download(book)
         local dest = downloadDir() .. "/" .. name
         os.remove(dest)
         os.rename(tmp, dest)
+        Library.invalidate()
         finish()
         UIManager:show(InfoMessage:new{ text = tr("Saved to %1", dest), timeout = 2 })
         UIManager:scheduleIn(1, function()
