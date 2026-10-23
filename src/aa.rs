@@ -118,6 +118,12 @@ pub fn search(chrome: &Chrome, query: &str, ext: Option<&str>, lang: Option<&str
             continue;
         }
         parse_meta(&mut book, &s("meta"));
+        if ext.is_some_and(|e| !book.ext.eq_ignore_ascii_case(e)) {
+            continue;
+        }
+        if lang.is_some_and(|l| !book.lang.is_empty() && !book.lang.to_lowercase().contains(&l.to_lowercase())) {
+            continue;
+        }
         books.push(book);
     }
     Ok(books)
