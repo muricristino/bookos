@@ -24,6 +24,7 @@ enum Job {
 struct State {
     chrome: Mutex<Option<Chrome>>,
     books: Mutex<HashMap<String, Book>>,
+    details: Mutex<HashMap<String, aa::Details>>,
     jobs: Mutex<HashMap<String, Job>>,
     show: bool,
 }
@@ -36,7 +37,7 @@ fn cache_dir(sub: &str) -> PathBuf {
 
 pub fn run(bind: &str, port: u16, show: bool) -> Result<()> {
     let server = Server::http((bind, port)).map_err(|e| anyhow!("could not listen on {bind}:{port}: {e}"))?;
-    let state = Arc::new(State { chrome: Mutex::new(None), books: Mutex::new(HashMap::new()), jobs: Mutex::new(HashMap::new()), show });
+    let state = Arc::new(State { chrome: Mutex::new(None), books: Mutex::new(HashMap::new()), details: Mutex::new(HashMap::new()), jobs: Mutex::new(HashMap::new()), show });
     eprintln!("bookos is serving on http://{bind}:{port}");
     for request in server.incoming_requests() {
         let state = state.clone();
@@ -56,6 +57,8 @@ fn handle(state: &Arc<State>, request: Request) {
     } else if let Some(rest) = path.strip_prefix("/cover/") {
         let width = params.get("w").and_then(|w| w.parse().ok()).unwrap_or(300u32).clamp(60, 1236);
         cover(state, rest.trim_end_matches(".jpg"), width)
+    } else if let Some(md5) = path.strip_prefix("/book/") {
+        book_details(state, md5)
     } else if let Some(md5) = path.strip_prefix("/download/") {
         download(state, md5)
     } else {
@@ -155,6 +158,31 @@ fn search(state: &State, params: &HashMap<String, String>) -> Result<Reply> {
         })
         .collect();
     Ok(json_reply(200, &json!({ "query": query, "results": results })))
+}
+
+fn book_details(state: &State, md5: &str) -> Result<Reply> {
+    if !valid_md5(md5) {
+        return Ok(json_reply(400, &json!({ "error": "bad md5" })));
+    }
+    let cached = state.details.lock().map_err(|_| anyhow!("lock poisoned"))?.get(md5).cloned();
+    let details = match cached {
+        Some(d) => d,
+        None => {
+            let mut d = with_chrome(state, |c| aa::details(c, md5))?;
+            if let Some(known) = state.books.lock().map_err(|_| anyhow!("lock poisoned"))?.get(md5)
+                && d.book.cover.is_empty()
+            {
+                d.book.cover = known.cover.clone();
+            }
+            state.books.lock().map_err(|_| anyhow!("lock poisoned"))?.entry(md5.to_string()).or_insert_with(|| d.book.clone());
+            state.details.lock().map_err(|_| anyhow!("lock poisoned"))?.insert(md5.to_string(), d.clone());
+            d
+        }
+    };
+    let mut v = serde_json::to_value(&details)?;
+    v["cover_url"] = if details.book.cover.is_empty() { Value::Null } else { json!(format!("/cover/{md5}.jpg")) };
+    v["download_url"] = json!(format!("/download/{md5}"));
+    Ok(json_reply(200, &v))
 }
 
 fn book_for(state: &State, md5: &str) -> Result<Book> {
