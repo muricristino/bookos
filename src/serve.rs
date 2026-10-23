@@ -336,7 +336,8 @@ fn save_cover(book: &Book, width: u32, path: &std::path::Path) -> Result<()> {
     let img = img.resize_exact(width, height, FilterType::Lanczos3);
     let mut out = Vec::new();
     JpegEncoder::new_with_quality(&mut out, 85).encode_image(&img)?;
-    let part = path.with_extension("part");
+    let tag: String = format!("{:?}", thread::current().id()).chars().filter(char::is_ascii_digit).collect();
+    let part = path.with_extension(format!("part{tag}"));
     fs::write(&part, out)?;
     fs::rename(&part, path)?;
     Ok(())
