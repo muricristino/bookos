@@ -85,6 +85,14 @@ bookos search 9788525054463
 bookos search machado de assis -f epub -l pt -n 20
 ```
 
+### Info
+
+```
+bookos info <n|md5> [--json]
+```
+
+Shows a book's page from Anna's Archive: title, author, publisher, the description, and other publishers, editions and titles it is known by.
+
 ### Download
 
 ```
@@ -159,6 +167,7 @@ Runs a small HTTP server so an e-reader on the same network can search and downl
 | Endpoint | Answer |
 |---|---|
 | `GET /search?q=&format=&lang=&by=&page=&n=&w=` | JSON with `results`: md5, title, author, publisher, year, lang, ext, size, `cover_url` and `download_url`. With `w`, the covers are fetched in the background at that width, so the e-reader gets them from the cache |
+| `GET /book/<md5>` | The book with `description` and `fields` (other publishers, editions, titles), as in `bookos info --json` |
 | `GET /cover/<md5>.jpg?w=300` | The cover as a grayscale JPEG, `w` pixels wide (60 to 1236), cached in `~/.cache/bookos/covers` |
 | `GET /download/<md5>` | `202` with JSON progress (`state`, `bytes`, `size`) while the server downloads; ask again until it answers `200` with the md5-checked file |
 
@@ -166,7 +175,7 @@ Downloads made through the server are kept in `~/.cache/bookos/downloads`.
 
 ### KOReader plugin
 
-`koreader/bookos.koplugin` searches a bookos server from [KOReader](https://koreader.rocks) and shows the results with their covers. It only looks for epub. The search box has a language filter (Portuguese by default) and can match the author or the title only; both choices are remembered. Turning past the last page loads the next page of results. Tap a book to download it into `<home folder>/bookos` and open it. The md5 is checked on the device too.
+`koreader/bookos.koplugin` searches a bookos server from [KOReader](https://koreader.rocks) and shows the results with their covers. It only looks for epub. The search box has a language filter (Portuguese by default) and can match the author or the title only; both choices are remembered. Turning past the last page loads the next page of results. Tap a book to open its page, with a large cover, the description and a download button. The download goes into `<home folder>/bookos` and the book opens when it arrives. The md5 is checked on the device too.
 
 1. Copy `koreader/bookos.koplugin` into KOReader's `plugins` folder (on a Kindle, `/mnt/us/koreader/plugins/`) and restart KOReader.
 2. Run `bookos serve` on a computer on the same network.
