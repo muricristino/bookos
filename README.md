@@ -221,6 +221,8 @@ Downloads made through the server are kept in `~/.cache/bookos/downloads`.
 
 When a book opens for the first time, the plugin asks the server how many pages the printed edition has (by the ISBN in the epub, or else by title, author and language) and numbers the pages to match it: KOReader's stable page numbers are turned on with the characters per page tuned so the book ends on the printed page count, and the status bar shows "page / printed pages". Books with publisher page numbers keep them. In the reader, bookos › Physical book pages lists the printed editions found, to pick another one or turn it off.
 
+With SimpleUI, the plugin also adds a "bookos: Biblioteca" home module with three tabs. Recentes shows the books opened last with their progress. Meus livros shows every book in the home folder, either grouped by author (most books first) or by title from A to Z. Spellings of the same author are merged, e.g. Fyodor Dostoyevsky and Fiódor Dostoiévski, keeping the accented one, and copies of the same book in several formats show once, preferring epub. Loja shows the shelves of `bookos store`, and a tap on a cover opens the book page.
+
 The plugin speaks Portuguese when KOReader is set to Portuguese, and English otherwise.
 
 ### Global flag
