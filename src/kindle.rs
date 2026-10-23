@@ -32,7 +32,8 @@ pub fn send(file: &Path, via: Option<&str>) -> Result<()> {
     match via.as_str() {
         "usb" => usb(file, &ext),
         "email" => email(file, &ext),
-        other => bail!("unknown way to send: {other} (use email or usb)"),
+        "ssh" => ssh(file),
+        other => bail!("unknown way to send: {other} (use email, usb or ssh)"),
     }
 }
 
@@ -45,6 +46,24 @@ fn usb(file: &Path, ext: &str) -> Result<()> {
     fs::copy(file, &dest).with_context(|| format!("could not copy to {}", dest.display()))?;
     println!("copied to {}", dest.display());
     println!("eject the Kindle and the book shows up in the library");
+    Ok(())
+}
+
+fn ssh(file: &Path) -> Result<()> {
+    let host = config("ssh").context("set the Kindle's ssh host: bookos config ssh kindle (a Host in ~/.ssh/config, or user@ip)")?;
+    let name = file.file_name().and_then(|n| n.to_str()).context("bad file name")?;
+    let dest = format!("/mnt/us/documents/{name}");
+    let quoted = format!("'{}'", dest.replace('\'', "'\\''"));
+    eprintln!("copying to {host}:{dest}…");
+    let status = std::process::Command::new("ssh")
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", &host, &format!("cat > {quoted}.part && mv {quoted}.part {quoted}")])
+        .stdin(fs::File::open(file)?)
+        .status()
+        .context("could not run ssh")?;
+    if !status.success() {
+        bail!("ssh to {host} failed ({status}); is the Kindle awake and on Wi-Fi?");
+    }
+    println!("copied to {host}:{dest}");
     Ok(())
 }
 

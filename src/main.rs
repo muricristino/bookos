@@ -27,6 +27,7 @@ use std::process::exit;
   kindle=you@kindle.com                           Send to Kindle address
   smtp_user=you@gmail.com                         account that emails the Kindle
   smtp=smtp.gmail.com:587                         SMTP server (guessed for Gmail, Outlook, iCloud, Yahoo)
+  ssh=kindle                                      ssh host of a jailbroken Kindle, for --via ssh
   mail_command=<shell command>                    send with another tool instead of SMTP;
                                                   {to}, {subject} and {file} are replaced
 
@@ -71,11 +72,11 @@ enum Cmd {
         #[arg(short, long)]
         kindle: bool,
     },
-    /// Send a book to the Kindle by email (Send to Kindle) or over USB
+    /// Send a book to the Kindle by email (Send to Kindle), over USB, or over ssh on a jailbroken Kindle
     Kindle {
         /// A file, a result number from the last search, or an md5 (downloaded first)
         target: String,
-        /// email or usb (default: usb when a Kindle is plugged in and reads the format, else email)
+        /// email, usb or ssh (default: usb when a Kindle is plugged in and reads the format, else email)
         #[arg(long)]
         via: Option<String>,
         /// Destination directory for the download
