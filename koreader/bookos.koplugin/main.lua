@@ -568,8 +568,30 @@ Library.setup{
     end,
 }
 
+local function wifiOffWhileAsleep()
+    if not Device:isKindle() or Device.bookos_wifi_hooked then return end
+    Device.bookos_wifi_hooked = true
+    local into, out = Device.intoScreenSaver, Device.outofScreenSaver
+    local turned_off = false
+    Device.intoScreenSaver = function(dev, ...)
+        if not dev.screen_saver_mode and NetworkMgr:isWifiOn() then
+            turned_off = true
+            os.execute("lipc-set-prop com.lab126.cmd wirelessEnable 0 &")
+        end
+        return into(dev, ...)
+    end
+    Device.outofScreenSaver = function(dev, ...)
+        if turned_off then
+            turned_off = false
+            os.execute("lipc-set-prop com.lab126.cmd wirelessEnable 1 &")
+        end
+        return out(dev, ...)
+    end
+end
+
 function Bookos:init()
     current = self
+    wifiOffWhileAsleep()
     local ok_reg, Registry = pcall(require, "modules/moduleregistry")
     if ok_reg and type(Registry) == "table" and Registry.register then Registry.register(Library) end
     Dispatcher:registerAction("bookos_search", { category = "none", event = "BookosSearch", title = tr("Search books"), general = true })
